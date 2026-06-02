@@ -160,13 +160,27 @@ The token itself is a random secret generated server-side at upload time and nev
 
 ## Getting Started
 
-> Full setup instructions coming soon.
+**Prerequisites:** [uv](https://docs.astral.sh/uv/), Python 3.11+, Docker
 
-1. Clone this repo
-2. Install dependencies (`pip install -r requirements.txt`)
-3. Initialize the SQLite database (`python -m db.init`)
-4. Build the Docker runner image (`docker build -t ttt-runner ./runner`)
-5. Start the web server (`uvicorn web.main:app --reload`)
+```bash
+git clone <repo>
+cd tic-tac-toe-event
+uv sync --group dev
+```
+
+### Common tasks
+
+| Command | Description |
+|---|---|
+| `uv run poe dev` | Start the web server with auto-reload |
+| `uv run poe test` | Run the test suite with coverage |
+| `uv run poe lint` | Check code with ruff |
+| `uv run poe format` | Auto-format code with ruff |
+| `uv run poe typecheck` | Type-check with ty |
+| `uv run poe check` | Run lint, typecheck, and test in sequence |
+| `uv run poe seed` | Seed the database with fake bots and matches |
+
+The app will be available at `http://localhost:8000` after running `dev`. The SQLite database (`ttt.db`) and the `bots/` directory are created automatically on first run.
 
 ## Project Structure
 

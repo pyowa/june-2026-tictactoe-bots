@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block content %}
+
+{% set result_label = {
+    'x_wins':    match.bot_x ~ ' won',
+    'o_wins':    match.bot_o ~ ' won',
+    'cat':       'Cat game',
+    'x_forfeit': match.bot_x ~ ' forfeited',
+    'o_forfeit': match.bot_o ~ ' forfeited'
+}[match.result] %}
+
+<section class="card">
+    <h2>Match #{{ match.id }}</h2>
+    <div class="match-meta">
+        <span><strong>X:</strong> {{ match.bot_x }}</span>
+        <span><strong>O:</strong> {{ match.bot_o }}</span>
+        <span><strong>Result:</strong> {{ result_label }}</span>
+        <span class="muted">{{ match.played_at }}</span>
+    </div>
+    <p><a href="/matches">&larr; Back to matches</a></p>
+</section>
+
+<section class="card">
+    <h2>Move Log</h2>
+    {% if moves %}
+    <div class="move-log">
+        {% for move in moves %}
+        <div class="move">
+            <div class="move-header">
+                <span class="move-number">Move {{ move.move_number }}</span>
+                <span class="move-bot">{{ move.bot_name }}</span>
+            </div>
+            {% if move.error %}
+            <div class="banner banner-error">Error: {{ move.error }}</div>
+            {% else %}
+            <div class="board">
+                {% for row in move.board_state.split('\n') %}
+                {% for cell in row.split('|') %}
+                <div class="cell cell-{{ cell | lower | replace('.', 'empty') }}">
+                    {{ '' if cell == '.' else cell }}
+                </div>
+                {% endfor %}
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="muted">No moves recorded for this match.</p>
+    {% endif %}
+</section>
+
+{% endblock %}

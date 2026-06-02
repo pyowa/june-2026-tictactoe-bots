@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="card">
+    <h2>Submit Your Bot</h2>
+
+    {% if error %}
+    <div class="banner banner-error">{{ error }}</div>
+    {% endif %}
+    {% if success %}
+    <div class="banner banner-success">{{ success }}</div>
+    {% endif %}
+
+    <p>Upload a <code>.py</code> file. Your bot must begin with a docstring containing a <code>name:</code> field:</p>
+    <pre><code>"""
+name: My Awesome Bot
+"""</code></pre>
+
+    <form method="post" action="/submit" enctype="multipart/form-data">
+        <label for="file">Bot script (.py)</label>
+        <input id="file" type="file" name="file" accept=".py" required>
+        <button type="submit">Submit Bot</button>
+    </form>
+</section>
+
+<section class="card">
+    <h2>Submitted Bots</h2>
+    {% if bots %}
+    <table>
+        <thead>
+            <tr>
+                <th>Bot Name</th>
+                <th>Submitted</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for bot in bots %}
+            <tr>
+                <td>{{ bot.versioned_name }}</td>
+                <td>{{ bot.submitted_at }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No bots submitted yet. Be the first!</p>
+    {% endif %}
+</section>
+
+{% endblock %}

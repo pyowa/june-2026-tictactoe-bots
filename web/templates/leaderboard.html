@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="card">
+    <h2>Leaderboard</h2>
+    {% if rows %}
+    <table>
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Bot</th>
+                <th>Clean Wins</th>
+                <th>Forfeit Wins</th>
+                <th>Draws</th>
+                <th>Losses</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            <tr>
+                <td class="muted">{{ loop.index }}</td>
+                <td><a href="/matches?bot={{ row.versioned_name }}">{{ row.versioned_name }}</a></td>
+                <td class="stat-wins">{{ row.clean_wins }}</td>
+                <td class="{% if row.forfeit_wins > 0 %}stat-forfeit{% else %}muted{% endif %}">{{ row.forfeit_wins }}</td>
+                <td class="muted">{{ row.draws }}</td>
+                <td class="muted">{{ row.losses }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No bots submitted yet.</p>
+    {% endif %}
+</section>
+
+{% endblock %}

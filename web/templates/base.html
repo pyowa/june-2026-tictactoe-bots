@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pyowa Tic-Tac-Toe Bot Battle</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <h1>&#9866; Pyowa Tic-Tac-Toe Bot Battle</h1>
+        <p class="subtitle">Iowa Python Users Group &mdash; Bot Competition</p>
+        <nav>
+            <a href="/">Submit</a>
+            <a href="/leaderboard">Leaderboard</a>
+            <a href="/matches">Matches</a>
+        </nav>
+    </header>
+
+    <div id="cookie-warning" class="banner banner-warning" style="display:none">
+        <strong>Cookies are disabled.</strong> You must enable cookies to submit a bot &mdash;
+        they are used to track ownership so you can update your bot during the event.
+    </div>
+
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+
+    <script>
+        // Detect if cookies are available
+        document.cookie = "ttt_check=1; SameSite=Lax";
+        if (!document.cookie.includes("ttt_check")) {
+            document.getElementById("cookie-warning").style.display = "block";
+        }
+        // Clean up the probe cookie
+        document.cookie = "ttt_check=; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax";
+    </script>
+</body>
+</html>

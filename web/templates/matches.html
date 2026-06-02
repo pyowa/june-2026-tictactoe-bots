@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="card">
+    <h2>
+        {% if selected_bot %}
+            Matches &mdash; {{ selected_bot }}
+        {% else %}
+            Recent Matches
+        {% endif %}
+    </h2>
+
+    <form class="filter-form" method="get" action="/matches">
+        <label for="bot-filter">Filter by bot</label>
+        <select id="bot-filter" name="bot" onchange="this.form.submit()">
+            <option value="">All bots</option>
+            {% for name in bot_names %}
+            <option value="{{ name }}"
+                {% if name == selected_bot %}selected{% endif %}>
+                {{ name }}
+            </option>
+            {% endfor %}
+        </select>
+        {% if selected_bot %}
+        <a href="/matches">Clear filter</a>
+        {% endif %}
+    </form>
+
+    {% if matches %}
+    <table>
+        <thead>
+            <tr>
+                <th>Bot X</th>
+                <th>Bot O</th>
+                <th>Result</th>
+                <th>Played</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for m in matches %}
+            {% set result_label = {
+                'x_wins':    m.bot_x ~ ' won',
+                'o_wins':    m.bot_o ~ ' won',
+                'cat':       'Cat game',
+                'x_forfeit': m.bot_x ~ ' forfeited',
+                'o_forfeit': m.bot_o ~ ' forfeited'
+            }[m.result] %}
+            <tr>
+                <td>{{ m.bot_x }}</td>
+                <td>{{ m.bot_o }}</td>
+                <td class="{% if m.result == 'cat' %}muted{% elif 'forfeit' in m.result %}stat-forfeit{% else %}stat-wins{% endif %}">
+                    {{ result_label }}
+                </td>
+                <td class="muted">{{ m.played_at }}</td>
+                <td><a href="/matches/{{ m.id }}">View &rarr;</a></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No matches played yet.</p>
+    {% endif %}
+</section>
+
+{% endblock %}

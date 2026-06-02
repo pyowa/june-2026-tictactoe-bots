@@ -1,0 +1,56 @@
+[project]
+name = "tic-tac-toe-event"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "jinja2",
+    "python-multipart",
+    "aiosqlite",
+]
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "httpx2",
+    "ruff",
+    "ty",
+    "poethepoet>=0.46.0",
+]
+
+[tool.poe.tasks]
+dev      = "uvicorn web.main:app --reload"
+test     = "pytest"
+lint     = "ruff check ."
+format   = "ruff format ."
+typecheck = "ty check web/ db/"
+seed     = "python scripts/seed.py"
+
+[tool.poe.tasks.check]
+sequence = ["lint", "typecheck", "test"]
+
+[tool.ruff]
+target-version = "py311"
+exclude = ["bots/"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "ANN"]
+ignore = ["ANN401"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ANN"]
+"scripts/*" = ["ANN"]
+
+[tool.pytest.ini_options]
+addopts = "--cov=web --cov=db --cov-report=term-missing"
+
+[tool.coverage.run]
+omit = ["bots/*", "scripts/*", "tests/*"]
+
+[tool.coverage.report]
+exclude_lines = ["if __name__ == .__main__.:"]
