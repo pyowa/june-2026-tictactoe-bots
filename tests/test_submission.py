@@ -1,10 +1,15 @@
+import asyncio
 import json
+import sqlite3
 import urllib.parse
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+import db.database
 import web.main
 from tests.conftest import upload
+from web.main import extract_python_version
 
 
 def read_owned_cookie(client: TestClient) -> dict:
@@ -123,3 +128,88 @@ def test_malformed_cookie_is_ignored(client):
     client.cookies.set("ttt_owned_bots", "not-valid-json%ZZ")
     resp = upload(client, "MyBot")
     assert "submitted successfully" in resp.text
+
+
+def test_python_version_defaults_when_omitted(client):
+    resp = upload(client, "MyBot")
+    assert "submitted successfully" in resp.text
+
+
+def test_python_version_accepted_major_only(client):
+    source = b'"""\nname: MyBot\npython: 3\n"""\nimport sys\n'
+    resp = client.post("/submit", files={"file": ("bot.py", source, "text/plain")})
+    assert "submitted successfully" in resp.text
+
+
+def test_python_version_accepted_major_minor(client):
+    source = b'"""\nname: MyBot\npython: 3.11\n"""\nimport sys\n'
+    resp = client.post("/submit", files={"file": ("bot.py", source, "text/plain")})
+    assert "submitted successfully" in resp.text
+
+
+def test_python_version_invalid_rejected(client):
+    source = b'"""\nname: MyBot\npython: latest\n"""\nimport sys\n'
+    resp = client.post("/submit", files={"file": ("bot.py", source, "text/plain")})
+    assert "Invalid" in resp.text
+    assert "python:" in resp.text
+
+
+# ---------------------------------------------------------------------------
+# extract_python_version — unit tests for defensive branches
+# ---------------------------------------------------------------------------
+
+
+def test_extract_python_version_syntax_error() -> None:
+    assert extract_python_version("def (:\n") is None
+
+
+def test_extract_python_version_empty_file() -> None:
+    assert extract_python_version("") is None
+
+
+def test_extract_python_version_non_string_constant() -> None:
+    assert extract_python_version("42\n") is None
+
+
+def test_extract_python_version_first_node_not_expr() -> None:
+    assert extract_python_version("import sys\n") is None
+
+
+def test_extract_python_version_no_python_field_returns_default() -> None:
+    source = '"""\nname: MyBot\n"""\nimport sys\n'
+    assert extract_python_version(source) == "3"
+
+
+# ---------------------------------------------------------------------------
+# DB migration — python_version added to existing schema
+# ---------------------------------------------------------------------------
+
+
+def test_migration_adds_python_version_to_existing_db(tmp_path: Path) -> None:
+    db_path = str(tmp_path / "old.db")
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """CREATE TABLE bots (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               base_name TEXT NOT NULL,
+               versioned_name TEXT NOT NULL UNIQUE,
+               version INTEGER NOT NULL DEFAULT 1,
+               owner_token TEXT NOT NULL,
+               file_path TEXT NOT NULL,
+               submitted_at TEXT NOT NULL DEFAULT (datetime('now'))
+           )"""
+    )
+    conn.commit()
+    conn.close()
+
+    original = db.database.DB_PATH
+    db.database.DB_PATH = db_path
+    try:
+        asyncio.run(db.database.init_db())
+    finally:
+        db.database.DB_PATH = original
+
+    conn = sqlite3.connect(db_path)
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(bots)").fetchall()]
+    conn.close()
+    assert "python_version" in cols

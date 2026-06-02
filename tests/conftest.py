@@ -20,22 +20,28 @@ def upload(client: TestClient, name: str, extra: str = ""):
     )
 
 
-def db_insert_bot(db_path: str, base_name: str, submitted_at: str | None = None) -> int:
+def db_insert_bot(
+    db_path: str,
+    base_name: str,
+    submitted_at: str | None = None,
+    python_version: str = "3",
+) -> int:
     conn = sqlite3.connect(db_path)
     if submitted_at:
         conn.execute(
             """INSERT INTO bots
                (base_name, versioned_name, version,
-                owner_token, file_path, submitted_at)
-               VALUES (?,?,?,?,?,?)""",
-            (base_name, base_name, 1, "token", f"/bots/{base_name}.py", submitted_at),
+                owner_token, file_path, python_version, submitted_at)
+               VALUES (?,?,?,?,?,?,?)""",
+            (base_name, base_name, 1, "token", f"/bots/{base_name}.py",
+             python_version, submitted_at),
         )
     else:
         conn.execute(
             """INSERT INTO bots
-               (base_name, versioned_name, version, owner_token, file_path)
-               VALUES (?,?,?,?,?)""",
-            (base_name, base_name, 1, "token", f"/bots/{base_name}.py"),
+               (base_name, versioned_name, version, owner_token, file_path, python_version)
+               VALUES (?,?,?,?,?,?)""",
+            (base_name, base_name, 1, "token", f"/bots/{base_name}.py", python_version),
         )
     bot_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
     conn.commit()

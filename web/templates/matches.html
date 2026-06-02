@@ -47,8 +47,8 @@
                 'o_forfeit': m.bot_o ~ ' forfeited'
             }[m.result] %}
             <tr>
-                <td>{{ m.bot_x }}</td>
-                <td>{{ m.bot_o }}</td>
+                <td>{{ m.bot_x }} <span class="muted">(py{{ m.bot_x_python }})</span></td>
+                <td>{{ m.bot_o }} <span class="muted">(py{{ m.bot_o_python }})</span></td>
                 <td class="{% if m.result == 'cat' %}muted{% elif 'forfeit' in m.result %}stat-forfeit{% else %}stat-wins{% endif %}">
                     {{ result_label }}
                 </td>

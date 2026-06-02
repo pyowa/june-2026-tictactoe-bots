@@ -200,9 +200,9 @@ def test_matches_filter_shows_only_matching_bot(client, db_path):
 
     resp = client.get("/matches?bot=AlphaBot")
     # GammaBot appears only in the dropdown, not in a table cell
-    assert "<td>AlphaBot</td>" in resp.text
-    assert "<td>BetaBot</td>" in resp.text  # shared match with AlphaBot
-    assert "<td>GammaBot</td>" not in resp.text
+    assert "<td>AlphaBot " in resp.text
+    assert "<td>BetaBot " in resp.text   # shared match with AlphaBot
+    assert "<td>GammaBot " not in resp.text
 
 
 def test_matches_filter_includes_bot_as_o(client, db_path):
@@ -213,8 +213,8 @@ def test_matches_filter_includes_bot_as_o(client, db_path):
     db_insert_match(db_path, b, c, winner_id=b, result="x_wins")  # AlphaBot uninvolved
 
     resp = client.get("/matches?bot=AlphaBot")
-    assert "<td>GammaBot</td>" in resp.text
-    assert "<td>BetaBot</td>" not in resp.text
+    assert "<td>GammaBot " in resp.text
+    assert "<td>BetaBot " not in resp.text
 
 
 def test_matches_no_filter_shows_all(client, db_path):
@@ -225,9 +225,9 @@ def test_matches_no_filter_shows_all(client, db_path):
     db_insert_match(db_path, b, c, winner_id=b, result="x_wins")
 
     resp = client.get("/matches")
-    assert "<td>AlphaBot</td>" in resp.text
-    assert "<td>BetaBot</td>" in resp.text
-    assert "<td>GammaBot</td>" in resp.text
+    assert "<td>AlphaBot " in resp.text
+    assert "<td>BetaBot " in resp.text
+    assert "<td>GammaBot " in resp.text
 
 
 def test_matches_filter_unknown_bot_shows_empty(client, db_path):
@@ -308,6 +308,26 @@ def test_match_detail_shows_both_bot_names(client, db_path):
     resp = client.get(f"/matches/{match_id}")
     assert "BotA" in resp.text
     assert "BotB" in resp.text
+
+
+def test_match_detail_shows_python_versions(client, db_path):
+    a = db_insert_bot(db_path, "BotA", python_version="3.11")
+    b = db_insert_bot(db_path, "BotB", python_version="3.12")
+    match_id = db_insert_match(db_path, a, b, winner_id=a, result="x_wins")
+
+    resp = client.get(f"/matches/{match_id}")
+    assert "Python 3.11" in resp.text
+    assert "Python 3.12" in resp.text
+
+
+def test_matches_list_shows_python_versions(client, db_path):
+    a = db_insert_bot(db_path, "BotA", python_version="3.11")
+    b = db_insert_bot(db_path, "BotB", python_version="3.12")
+    db_insert_match(db_path, a, b, winner_id=a, result="x_wins")
+
+    resp = client.get("/matches")
+    assert "py3.11" in resp.text
+    assert "py3.12" in resp.text
 
 
 def test_match_detail_shows_result(client, db_path):

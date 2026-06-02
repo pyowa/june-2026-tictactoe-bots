@@ -4,6 +4,93 @@ A web platform for the Iowa Python Users Group (Pyowa) bot battle event. Partici
 
 ---
 
+## Writing a Bot
+
+This is everything you need to participate. Read this section before anything else.
+
+### 1. Start with the required docstring
+
+Your bot must be a `.py` file whose very first thing is a docstring containing a `name:` field. This is how your bot appears on the leaderboard.
+
+```python
+"""
+name: My Awesome Bot
+"""
+```
+
+You can also specify which Python version to run your bot with. If you leave it out, the latest Python 3 is used.
+
+```python
+"""
+name: My Awesome Bot
+python: 3.11
+"""
+```
+
+Valid values: a major version (`3`) or a major.minor version (`3.11`, `3.12`, `3.13`, etc.).
+
+### 2. Read from stdin, write to stdout
+
+Your bot is called once per move. It receives the current board state on stdin and must print the updated board to stdout.
+
+**Input format:**
+```
+X
+X|.|.
+.|O|.
+.|.|.
+```
+
+The first line is the symbol you are playing (`X` or `O`). The next three lines are the board — pipe-delimited, one row per line. Cells are `X`, `O`, or `.` (empty).
+
+**Output format:**
+```
+X|.|.
+.|O|.
+.|X|.
+```
+
+Print the same board with exactly one new piece placed — your symbol in an empty cell.
+
+### 3. Rules and forfeits
+
+Your bot forfeits the game immediately if it:
+
+- Produces no output
+- Outputs something that isn't a valid 3×3 board
+- Places more than one piece, or places in an already-occupied cell
+- Places the wrong symbol (e.g. places `O` when you are `X`)
+- Raises an unhandled exception
+- Exceeds the per-move time limit
+
+Forfeits are recorded separately from clean wins on the leaderboard so the result is never misleading.
+
+### 4. Example bot
+
+```python
+"""
+name: Top-Left Bot
+"""
+import sys
+
+data = sys.stdin.read().strip().splitlines()
+symbol = data[0]          # 'X' or 'O'
+board = [row.split('|') for row in data[1:]]
+
+for r in range(3):
+    for c in range(3):
+        if board[r][c] == '.':
+            board[r][c] = symbol
+            print('\n'.join('|'.join(row) for row in board))
+            sys.exit(0)
+```
+
+### 5. Submit your bot
+
+Go to the web UI at `http://localhost:8000`, upload your `.py` file, and your bot will be entered into the competition. The first time you submit a name you own it — the site sets a cookie so you can update your bot later. Re-uploading the same name increments the version automatically (`MyBot` → `MyBotV2` → `MyBotV3`). All versions compete independently.
+
+---
+
 ## Overview
 
 Participants write a Python script implementing a bot that plays tic-tac-toe. Submitted bots are run against each other in isolated Docker containers to ensure fair, sandboxed execution. Match results are recorded in a local database and displayed on a leaderboard.
@@ -11,9 +98,9 @@ Participants write a Python script implementing a bot that plays tic-tac-toe. Su
 ## Features
 
 - **Bot submission** — upload a Python script through the web UI
-- **Automated matchmaking** — bots are paired and scheduled for matches
+- **Automated matchmaking** — bots are paired and scheduled for matches; every bot plays every other bot as both X and O
 - **Sandboxed execution** — each match runs in an isolated Docker container with resource limits
-- **Leaderboard** — live standings based on win/loss/draw record
+- **Leaderboard** — live standings with separate clean wins and forfeit win columns
 - **Match history** — view results, move logs, and game replays for any match
 
 ## Architecture
@@ -54,9 +141,7 @@ The runner orchestrates a single match between two bots, alternating turns until
    - **Cat game** — all nine cells are filled with no winner. Both bots are recorded as `cat` for the match.
 5. If the game continues, swap to the other bot and repeat
 
-**First move:** The runner sends `X`, a blank line, then an empty board (`.|.|.` × 3) to bot X. Bot X plays first and must place an `X`.
-
-Any validation failure at step 3, unhandled exception, or timeout is an immediate forfeit. The offending bot is recorded as having forfeited; the opponent is awarded the win. Forfeits are flagged distinctly from clean wins on the leaderboard and in match history so the result is not misleading.
+Any validation failure at step 3, unhandled exception, or timeout is an immediate forfeit. The offending bot is recorded as having forfeited; the opponent is awarded the win.
 
 **Match logging:** For every match the runner records to the database:
 - Which bot is playing X and which is playing O
@@ -64,21 +149,7 @@ Any validation failure at step 3, unhandled exception, or timeout is an immediat
 - The outcome (win/draw/forfeit) and which bot caused a forfeit if applicable
 - Any errors or invalid output produced by either bot
 
-## Bot Requirements
-
-### Required docstring
-
-Every submitted bot must begin with a module-level docstring containing a `name:` field. This is how your bot will appear on the leaderboard.
-
-```python
-"""
-name: My Awesome Bot
-"""
-```
-
-The upload will be rejected if the docstring is missing or does not contain a `name:` line.
-
-### Bot ownership and versioning
+## Bot Ownership and Versioning
 
 When you successfully upload a bot, the site sets a cookie in your browser recording your ownership of that bot name. This is how subsequent uploads are handled:
 
@@ -88,66 +159,6 @@ When you successfully upload a bot, the site sets a cookie in your browser recor
 No accounts or passwords are involved. Clearing your cookies means losing the ability to update your bot under its original name, so hold onto that browser session for the duration of the event.
 
 The site will display a warning banner if cookies are disabled, since submission and versioning will not work without them.
-
-### Interface
-
-Bots communicate with the match runner over **stdin/stdout** and are fully stateless — each invocation is one move.
-
-**Input** (written to the bot's stdin):
-```
-X
-X|.|.
-.|O|.
-.|.|.
-```
-The first line is the symbol your bot is playing (`X` or `O`), followed by the 3×3 board — pipe-delimited, one row per line. Cells are `X`, `O`, or `.` (empty).
-
-**Output** (bot writes to stdout):
-```
-X|.|.
-.|O|.
-.|X|.
-```
-The same board format with exactly one new piece placed.
-
-Bots that produce invalid output, overwrite an existing piece, place the wrong symbol, raise an unhandled exception, or exceed the per-move time limit forfeit that game.
-
-### Example bot
-
-```python
-"""
-name: Top-Left Bot
-"""
-import sys
-
-data = sys.stdin.read().strip().splitlines()
-symbol = data[0]          # 'X' or 'O'
-board = [row.split('|') for row in data[1:]]
-
-for r in range(3):
-    for c in range(3):
-        if board[r][c] == '.':
-            board[r][c] = symbol
-            print('\n'.join('|'.join(row) for row in board))
-            sys.exit(0)
-```
-
-## Cookie Ownership Model
-
-On a successful bot upload, the server generates a unique ownership token and:
-
-1. Stores it in the database against that bot's base name (e.g. `MyBot`)
-2. Sets it in the browser as a cookie in a map of `bot_name → token`
-
-On a subsequent upload with the same name, the server reads the cookie, looks up the stored token for that name, and compares them. A match allows the versioned upload; a mismatch or missing cookie rejects it.
-
-Because a participant may own multiple bots, the cookie holds a JSON map rather than a single token:
-
-```json
-{ "MyBot": "a3f9...", "AnotherBot": "7c2e..." }
-```
-
-The token itself is a random secret generated server-side at upload time and never reused across bot names.
 
 ## Tech Stack
 
@@ -178,6 +189,7 @@ uv sync --group dev
 | `uv run poe format` | Auto-format code with ruff |
 | `uv run poe typecheck` | Type-check with ty |
 | `uv run poe check` | Run lint, typecheck, and test in sequence |
+| `uv run poe runner` | Start the match runner process |
 | `uv run poe seed` | Seed the database with fake bots and matches |
 
 The app will be available at `http://localhost:8000` after running `dev`. The SQLite database (`ttt.db`) and the `bots/` directory are created automatically on first run.

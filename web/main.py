@@ -76,6 +76,36 @@ def extract_bot_name(source: str) -> str | None:
 
 
 _VERSIONED_RE = re.compile(r"^(.+)V\d+$")
+_PYTHON_VERSION_RE = re.compile(r"^\d+(\.\d+)?$")
+
+
+def extract_python_version(source: str) -> str | None:
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return None
+
+    if not tree.body:
+        return None
+
+    first = tree.body[0]
+    if not isinstance(first, ast.Expr) or not isinstance(first.value, ast.Constant):
+        return None
+
+    docstring = first.value.value
+    if not isinstance(docstring, str):
+        return None
+
+    for line in docstring.splitlines():
+        stripped = line.strip()
+        if stripped.lower().startswith("python:"):
+            version = stripped[7:].strip()
+            if version and _PYTHON_VERSION_RE.match(version):
+                return version
+            elif version:
+                return None  # present but invalid
+
+    return "3"
 
 
 def implied_base(name: str) -> str | None:
@@ -120,6 +150,16 @@ async def submit_bot(
             error="Your bot must start with a docstring containing 'name: <name>'.",
         )
 
+    python_version = extract_python_version(source)
+    if python_version is None:
+        return _render(
+            request,
+            error=(
+                "Invalid 'python:' value in docstring. "
+                "Use a version like '3', '3.11', or '3.12'."
+            ),
+        )
+
     owned = parse_cookie(ttt_owned_bots)
 
     async with aiosqlite.connect(DB_PATH) as db:
@@ -150,7 +190,9 @@ async def submit_bot(
         name = versioned_name(bot_name, version)
         file_path = BOTS_DIR / f"{name}.py"
         file_path.write_text(source)
-        await insert_bot(db, bot_name, name, version, owner_token, str(file_path))
+        await insert_bot(
+            db, bot_name, name, version, owner_token, str(file_path), python_version
+        )
         bots = await list_bots(db)
 
     owned[bot_name] = owner_token

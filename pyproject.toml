@@ -28,7 +28,8 @@ dev      = "uvicorn web.main:app --reload"
 test     = "pytest"
 lint     = "ruff check ."
 format   = "ruff format ."
-typecheck = "ty check web/ db/"
+typecheck = "ty check web/ db/ runner/"
+runner   = "python runner/match_runner.py"
 seed     = "python scripts/seed.py"
 
 [tool.poe.tasks.check]
@@ -47,7 +48,7 @@ ignore = ["ANN401"]
 "scripts/*" = ["ANN"]
 
 [tool.pytest.ini_options]
-addopts = "--cov=web --cov=db --cov-report=term-missing"
+addopts = "--cov=web --cov=db --cov=runner --cov-report=term-missing"
 
 [tool.coverage.run]
 omit = ["bots/*", "scripts/*", "tests/*"]

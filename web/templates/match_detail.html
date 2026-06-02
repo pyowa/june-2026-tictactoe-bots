@@ -12,8 +12,8 @@
 <section class="card">
     <h2>Match #{{ match.id }}</h2>
     <div class="match-meta">
-        <span><strong>X:</strong> {{ match.bot_x }}</span>
-        <span><strong>O:</strong> {{ match.bot_o }}</span>
+        <span><strong>X:</strong> {{ match.bot_x }} <span class="muted">(Python {{ match.bot_x_python }})</span></span>
+        <span><strong>O:</strong> {{ match.bot_o }} <span class="muted">(Python {{ match.bot_o_python }})</span></span>
         <span><strong>Result:</strong> {{ result_label }}</span>
         <span class="muted">{{ match.played_at }}</span>
     </div>

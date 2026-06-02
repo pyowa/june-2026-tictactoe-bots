@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS bots (
     version INTEGER NOT NULL DEFAULT 1,
     owner_token TEXT NOT NULL,
     file_path TEXT NOT NULL,
+    python_version TEXT NOT NULL DEFAULT '3',
     submitted_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

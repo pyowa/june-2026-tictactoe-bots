@@ -10,7 +10,17 @@ async def init_db() -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         await db.executescript(SCHEMA_PATH.read_text())
+        await _migrate(db)
         await db.commit()
+
+
+async def _migrate(db: aiosqlite.Connection) -> None:
+    async with db.execute("PRAGMA table_info(bots)") as cursor:
+        cols = {row[1] for row in await cursor.fetchall()}
+    if "python_version" not in cols:
+        await db.execute(
+            "ALTER TABLE bots ADD COLUMN python_version TEXT NOT NULL DEFAULT '3'"
+        )
 
 
 async def get_owner_token(db: aiosqlite.Connection, base_name: str) -> str | None:
@@ -36,11 +46,13 @@ async def insert_bot(
     version: int,
     owner_token: str,
     file_path: str,
+    python_version: str = "3",
 ) -> None:
     await db.execute(
-        """INSERT INTO bots (base_name, versioned_name, version, owner_token, file_path)
-           VALUES (?, ?, ?, ?, ?)""",
-        (base_name, versioned_name, version, owner_token, file_path),
+        """INSERT INTO bots
+           (base_name, versioned_name, version, owner_token, file_path, python_version)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (base_name, versioned_name, version, owner_token, file_path, python_version),
     )
     await db.commit()
 
@@ -93,7 +105,9 @@ async def list_matches(
         SELECT
             m.id,
             bx.versioned_name AS bot_x,
+            bx.python_version AS bot_x_python,
             bo.versioned_name AS bot_o,
+            bo.python_version AS bot_o_python,
             bw.versioned_name AS winner,
             m.result,
             m.played_at
@@ -125,7 +139,9 @@ async def get_match(db: aiosqlite.Connection, match_id: int) -> aiosqlite.Row | 
         SELECT
             m.id,
             bx.versioned_name AS bot_x,
+            bx.python_version AS bot_x_python,
             bo.versioned_name AS bot_o,
+            bo.python_version AS bot_o_python,
             bw.versioned_name AS winner,
             m.result,
             m.played_at
