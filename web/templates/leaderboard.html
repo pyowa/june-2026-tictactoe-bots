@@ -3,6 +3,7 @@
 
 <section class="card">
     <h2>Leaderboard</h2>
+    <div id="live-region">
     {% if rows %}
     <table>
         <thead>
@@ -31,6 +32,11 @@
     {% else %}
     <p class="muted">No bots submitted yet.</p>
     {% endif %}
+    </div>
 </section>
 
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/live-poll.js" data-target="live-region" data-interval="2000"></script>
 {% endblock %}

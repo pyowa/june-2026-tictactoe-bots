@@ -1,3 +1,4 @@
+import asyncio
 import signal
 import sqlite3
 import subprocess
@@ -7,7 +8,7 @@ import types
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from db.database import DB_PATH
+from db.database import DB_PATH, init_db
 from runner.engine import MatchResult, play_match
 
 POLL_INTERVAL = 5
@@ -40,7 +41,7 @@ def find_unplayed_pairs(db_path: str) -> list[tuple[int, str, str, int, str, str
         SELECT a.id, a.file_path, a.python_version,
                b.id, b.file_path, b.python_version
         FROM bots a
-        JOIN bots b ON a.id != b.id
+        JOIN bots b
         WHERE NOT EXISTS (
             SELECT 1 FROM matches m
             WHERE m.bot_x_id = a.id AND m.bot_o_id = b.id
@@ -93,6 +94,7 @@ def run(db_path: str = DB_PATH, poll_interval: int = POLL_INTERVAL) -> None:
     signal.signal(signal.SIGTERM, _handle_signal)
 
     print("Runner started. Press Ctrl+C to stop.")
+    asyncio.run(init_db())
     pull_images(db_path)
 
     pulled_versions: set[str] = set()

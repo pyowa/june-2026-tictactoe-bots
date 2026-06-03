@@ -32,6 +32,14 @@ typecheck = "ty check web/ db/ runner/"
 runner   = "python runner/match_runner.py"
 seed     = "python scripts/seed.py"
 
+[tool.poe.tasks.start]
+shell = """
+trap 'kill 0' EXIT
+uvicorn web.main:app --reload &
+python runner/match_runner.py &
+wait
+"""
+
 [tool.poe.tasks.check]
 sequence = ["lint", "typecheck", "test"]
 

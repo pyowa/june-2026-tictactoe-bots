@@ -98,7 +98,7 @@ Participants write a Python script implementing a bot that plays tic-tac-toe. Su
 ## Features
 
 - **Bot submission** — upload a Python script through the web UI
-- **Automated matchmaking** — bots are paired and scheduled for matches; every bot plays every other bot as both X and O
+- **Automated matchmaking** — every bot plays every other bot as both X and O, and also plays a mirror match against itself (X vs. O run from the same script)
 - **Sandboxed execution** — each match runs in an isolated Docker container with resource limits
 - **Leaderboard** — live standings with separate clean wins and forfeit win columns
 - **Match history** — view results, move logs, and game replays for any match
@@ -126,6 +126,8 @@ Participants write a Python script implementing a bot that plays tic-tac-toe. Su
 ## Runner
 
 The runner orchestrates a single match between two bots, alternating turns until the game ends.
+
+**Pairing:** the runner schedules every ordered pair `(X, O)` from the set of submitted bots, including the self-pair `(Bot, Bot)`. Each self-match runs as two independent subprocesses from the same source file — the bot plays both sides, with no shared state between turns. This is useful for catching bugs that only surface when a bot faces its own strategy.
 
 **Turn loop:**
 
@@ -183,16 +185,17 @@ uv sync --group dev
 
 | Command | Description |
 |---|---|
+| `uv run poe start` | Start the web server and the match runner together (Ctrl+C stops both) |
 | `uv run poe dev` | Start the web server with auto-reload |
+| `uv run poe runner` | Start the match runner process |
 | `uv run poe test` | Run the test suite with coverage |
 | `uv run poe lint` | Check code with ruff |
 | `uv run poe format` | Auto-format code with ruff |
 | `uv run poe typecheck` | Type-check with ty |
 | `uv run poe check` | Run lint, typecheck, and test in sequence |
-| `uv run poe runner` | Start the match runner process |
 | `uv run poe seed` | Seed the database with fake bots and matches |
 
-The app will be available at `http://localhost:8000` after running `dev`. The SQLite database (`ttt.db`) and the `bots/` directory are created automatically on first run.
+The app will be available at `http://localhost:8000` after running `start` or `dev`. The SQLite database (`ttt.db`) and the `bots/` directory are created automatically on first run.
 
 ## Project Structure
 

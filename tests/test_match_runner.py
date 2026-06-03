@@ -116,7 +116,9 @@ def test_find_unplayed_pairs_two_bots_no_matches(db_path: str) -> None:
     ids = {(x, o) for x, _, _, o, _, _ in pairs}
     assert (a, b) in ids
     assert (b, a) in ids
-    assert len(pairs) == 2
+    assert (a, a) in ids
+    assert (b, b) in ids
+    assert len(pairs) == 4
 
 
 def test_find_unplayed_pairs_one_direction_played(db_path: str) -> None:
@@ -127,14 +129,18 @@ def test_find_unplayed_pairs_one_direction_played(db_path: str) -> None:
     ids = {(x, o) for x, _, _, o, _, _ in pairs}
     assert (a, b) not in ids
     assert (b, a) in ids
-    assert len(pairs) == 1
+    assert (a, a) in ids
+    assert (b, b) in ids
+    assert len(pairs) == 3
 
 
-def test_find_unplayed_pairs_both_directions_played(db_path: str) -> None:
+def test_find_unplayed_pairs_all_pairs_played(db_path: str) -> None:
     a = insert_bot(db_path, "BotA")
     b = insert_bot(db_path, "BotB")
     insert_match(db_path, a, b, "x_wins", winner_id=a)
     insert_match(db_path, b, a, "x_wins", winner_id=b)
+    insert_match(db_path, a, a, "cat")
+    insert_match(db_path, b, b, "cat")
     assert find_unplayed_pairs(db_path) == []
 
 
@@ -144,11 +150,10 @@ def test_find_unplayed_pairs_three_bots(db_path: str) -> None:
     c = insert_bot(db_path, "BotC")
     pairs = find_unplayed_pairs(db_path)
     ids = {(x, o) for x, _, _, o, _, _ in pairs}
-    assert len(ids) == 6
+    assert len(ids) == 9
     for x in (a, b, c):
         for o in (a, b, c):
-            if x != o:
-                assert (x, o) in ids
+            assert (x, o) in ids
 
 
 def test_find_unplayed_pairs_returns_file_paths(db_path: str) -> None:
