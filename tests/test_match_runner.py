@@ -1,14 +1,18 @@
 import signal
 import sqlite3
-import textwrap
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from runner.engine import MatchResult, Move
-from runner.match_runner import find_unplayed_pairs, pull_images, record_match, run, unique_python_versions
-
+from runner.match_runner import (
+    find_unplayed_pairs,
+    pull_images,
+    record_match,
+    run,
+    unique_python_versions,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -16,11 +20,8 @@ from runner.match_runner import find_unplayed_pairs, pull_images, record_match, 
 
 
 def init_schema(db_path: str) -> None:
-    from db.database import SCHEMA_PATH
-    conn = sqlite3.connect(db_path)
-    conn.executescript(SCHEMA_PATH.read_text())
-    conn.commit()
-    conn.close()
+    from tests.conftest import create_schema
+    create_schema(db_path)
 
 
 def insert_bot(
@@ -92,7 +93,9 @@ def test_pull_images_calls_docker_pull_for_each_version(db_path: str) -> None:
     assert ["docker", "pull", "python:3.12"] in pulled
 
 
-def test_pull_images_warns_on_failure(db_path: str, capsys: pytest.CaptureFixture) -> None:
+def test_pull_images_warns_on_failure(
+    db_path: str, capsys: pytest.CaptureFixture
+) -> None:
     insert_bot(db_path, "BotA", python_version="3.99")
     with patch("runner.match_runner.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=1)

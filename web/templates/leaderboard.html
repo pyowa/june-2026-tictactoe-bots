@@ -14,17 +14,19 @@
                 <th>Forfeit Wins</th>
                 <th>Draws</th>
                 <th>Losses</th>
+                <th>Lifetime</th>
             </tr>
         </thead>
         <tbody>
             {% for row in rows %}
             <tr>
                 <td class="muted">{{ loop.index }}</td>
-                <td><a href="/matches?bot={{ row.versioned_name }}">{{ row.versioned_name }}</a></td>
+                <td><a href="/bots/{{ row.base_name }}">{{ row.versioned_name }}</a></td>
                 <td class="stat-wins">{{ row.clean_wins }}</td>
                 <td class="{% if row.forfeit_wins > 0 %}stat-forfeit{% else %}muted{% endif %}">{{ row.forfeit_wins }}</td>
                 <td class="muted">{{ row.draws }}</td>
                 <td class="muted">{{ row.losses }}</td>
+                <td class="muted">{{ row.lifetime_wins }}&ndash;{{ row.lifetime_losses }}</td>
             </tr>
             {% endfor %}
         </tbody>

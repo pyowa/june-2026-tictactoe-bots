@@ -1,12 +1,8 @@
-import asyncio
 import json
-import sqlite3
 import urllib.parse
-from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-import db.database
 import web.main
 from tests.conftest import upload
 from web.main import extract_python_version
@@ -181,35 +177,34 @@ def test_extract_python_version_no_python_field_returns_default() -> None:
 
 
 # ---------------------------------------------------------------------------
-# DB migration — python_version added to existing schema
+# On-disk file persistence
 # ---------------------------------------------------------------------------
 
 
-def test_migration_adds_python_version_to_existing_db(tmp_path: Path) -> None:
-    db_path = str(tmp_path / "old.db")
-    conn = sqlite3.connect(db_path)
-    conn.execute(
-        """CREATE TABLE bots (
-               id INTEGER PRIMARY KEY AUTOINCREMENT,
-               base_name TEXT NOT NULL,
-               versioned_name TEXT NOT NULL UNIQUE,
-               version INTEGER NOT NULL DEFAULT 1,
-               owner_token TEXT NOT NULL,
-               file_path TEXT NOT NULL,
-               submitted_at TEXT NOT NULL DEFAULT (datetime('now'))
-           )"""
-    )
-    conn.commit()
-    conn.close()
+def test_upload_writes_py_file_to_bots_dir(client, bots_dir):
+    upload(client, "MyBot", extra="x = 42\n")
+    saved = bots_dir / "MyBot.py"
+    assert saved.exists()
+    assert "name: MyBot" in saved.read_text()
+    assert "x = 42" in saved.read_text()
 
-    original = db.database.DB_PATH
-    db.database.DB_PATH = db_path
-    try:
-        asyncio.run(db.database.init_db())
-    finally:
-        db.database.DB_PATH = original
 
-    conn = sqlite3.connect(db_path)
-    cols = [row[1] for row in conn.execute("PRAGMA table_info(bots)").fetchall()]
-    conn.close()
-    assert "python_version" in cols
+def test_upload_writes_py_file_to_bots_dir_stripping_extra_chars(client, bots_dir):
+    bot_name = "!234 My Be$t Bot 4EVAI$%U#(($*@*#&$^%"
+    upload(client, bot_name, extra="x = 42\n")
+    saved = bots_dir / "mybot.py"
+    assert saved.exists()
+    assert f"name: {bot_name}" in saved.read_text()
+    assert "x = 42" in saved.read_text()
+
+
+def test_resubmit_writes_versioned_file_and_keeps_v1(client, bots_dir):
+    upload(client, "MyBot", extra="# v1 marker\n")
+    upload(client, "MyBot", extra="# v2 marker\n")
+    v1 = bots_dir / "MyBot.py"
+    v2 = bots_dir / "MyBotV2.py"
+    assert v1.exists() and v2.exists()
+    assert "# v1 marker" in v1.read_text()
+    assert "# v2 marker" in v2.read_text()
+
+

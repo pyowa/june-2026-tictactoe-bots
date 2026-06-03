@@ -2,9 +2,18 @@ import sqlite3
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
 
 import db.database
 import web.main
+from db.models import Base
+
+
+def create_schema(db_path: str) -> None:
+    """Build the full schema synchronously from the ORM models."""
+    engine = create_engine(f"sqlite:///{db_path}")
+    Base.metadata.create_all(engine)
+    engine.dispose()
 
 BOT_TEMPLATE = '"""\nname: {name}\n"""\nimport sys\n'
 
@@ -39,9 +48,17 @@ def db_insert_bot(
     else:
         conn.execute(
             """INSERT INTO bots
-               (base_name, versioned_name, version, owner_token, file_path, python_version)
+               (base_name, versioned_name, version,
+                owner_token, file_path, python_version)
                VALUES (?,?,?,?,?,?)""",
-            (base_name, base_name, 1, "token", f"/bots/{base_name}.py", python_version),
+            (
+                base_name,
+                base_name,
+                1,
+                "token",
+                f"/bots/{base_name}.py",
+                python_version,
+            ),
         )
     bot_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
     conn.commit()
@@ -96,16 +113,21 @@ def db_insert_move(
 
 @pytest.fixture()
 def db_path(tmp_path):
-    return str(tmp_path / "test.db")
+    path = str(tmp_path / "test.db")
+    create_schema(path)
+    return path
 
 
 @pytest.fixture()
-def client(db_path, tmp_path, monkeypatch):
-    bots_dir = tmp_path / "bots"
-    bots_dir.mkdir()
+def bots_dir(tmp_path):
+    path = tmp_path / "bots"
+    path.mkdir()
+    return path
 
-    monkeypatch.setattr(db.database, "DB_PATH", db_path)
-    monkeypatch.setattr(web.main, "DB_PATH", db_path)
+
+@pytest.fixture()
+def client(db_path, bots_dir, monkeypatch):
+    db.database.reconfigure(db_path)
     monkeypatch.setattr(web.main, "BOTS_DIR", bots_dir)
 
     with TestClient(web.main.app) as c:

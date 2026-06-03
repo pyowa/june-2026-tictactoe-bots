@@ -8,6 +8,9 @@ dependencies = [
     "jinja2",
     "python-multipart",
     "aiosqlite",
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "greenlet",
 ]
 
 [tool.uv]
@@ -21,16 +24,21 @@ dev = [
     "ruff",
     "ty",
     "poethepoet>=0.46.0",
+    "pymarkdownlnt>=0.9",
 ]
 
 [tool.poe.tasks]
 dev      = "uvicorn web.main:app --reload"
 test     = "pytest"
 lint     = "ruff check ."
+lint-md  = "pymarkdown scan README.md TODO.md"
 format   = "ruff format ."
 typecheck = "ty check web/ db/ runner/"
 runner   = "python runner/match_runner.py"
 seed     = "python scripts/seed.py"
+seed-examples = "python scripts/seed_example_bots.py"
+migrate  = "alembic upgrade head"
+reset-db = "python scripts/reset_db.py"
 
 [tool.poe.tasks.start]
 shell = """
@@ -41,11 +49,11 @@ wait
 """
 
 [tool.poe.tasks.check]
-sequence = ["lint", "typecheck", "test"]
+sequence = ["lint", "lint-md", "typecheck", "test"]
 
 [tool.ruff]
 target-version = "py311"
-exclude = ["bots/"]
+exclude = ["bots/", "example_bots/", "alembic/versions/"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "ANN"]
@@ -59,7 +67,18 @@ ignore = ["ANN401"]
 addopts = "--cov=web --cov=db --cov=runner --cov-report=term-missing"
 
 [tool.coverage.run]
-omit = ["bots/*", "scripts/*", "tests/*"]
+omit = ["bots/*", "scripts/*", "tests/*", "example_bots/*"]
+# Use Python's sys.monitoring (Python 3.12+); the default sys.settrace tracer
+# misses lines inside async with blocks that go through @asynccontextmanager.
+core = "sysmon"
 
 [tool.coverage.report]
-exclude_lines = ["if __name__ == .__main__.:"]
+exclude_lines = [
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+
+[tool.pymarkdown]
+# MD013: line length — disabled because we use long prose lines; editors and
+# GitHub reflow them automatically and hard-wrapping makes diffs noisy.
+plugins.md013.enabled = false

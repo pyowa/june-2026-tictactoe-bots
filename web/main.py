@@ -4,12 +4,9 @@ import re
 import secrets
 import sys
 import urllib.parse
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-import aiosqlite
 from fastapi import Cookie, FastAPI, File, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -17,13 +14,13 @@ from fastapi.templating import Jinja2Templates
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from db.database import (
-    DB_PATH,
+    get_bot_family,
     get_leaderboard,
     get_match,
     get_moves,
     get_next_version,
     get_owner_token,
-    init_db,
+    get_session,
     insert_bot,
     list_bot_names,
     list_bots,
@@ -34,13 +31,7 @@ BOTS_DIR = Path(__file__).parent.parent / "bots"
 BOTS_DIR.mkdir(exist_ok=True)
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    await init_db()
-    yield
-
-
-app = FastAPI(lifespan=lifespan)
+app = FastAPI()
 app.mount(
     "/static",
     StaticFiles(directory=Path(__file__).parent / "static"),
@@ -118,6 +109,17 @@ def versioned_name(base_name: str, version: int) -> str:
     return base_name if version == 1 else f"{base_name}V{version}"
 
 
+def safe_filename_base(name: str) -> str:
+    """Sanitize a bot name into a safe filename stem (no extension, no version
+    suffix). Clean ASCII-alphanumeric names are preserved as-is; messy names
+    are reduced to their whitespace-separated all-alphabetic tokens,
+    lowercased and concatenated."""
+    if name.isascii() and name.isalnum():
+        return name
+    tokens = [t.lower() for t in name.split() if t.isascii() and t.isalpha()]
+    return "".join(tokens) or "bot"
+
+
 def parse_cookie(value: str | None) -> dict:
     if not value:
         return {}
@@ -129,9 +131,8 @@ def parse_cookie(value: str | None) -> dict:
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request) -> HTMLResponse:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        bots = await list_bots(db)
+    async with get_session() as session:
+        bots = await list_bots(session)
     return templates.TemplateResponse(request, "index.html", {"bots": bots})
 
 
@@ -162,11 +163,9 @@ async def submit_bot(
 
     owned = parse_cookie(ttt_owned_bots)
 
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-
+    async with get_session() as session:
         base = implied_base(bot_name)
-        if base and await get_owner_token(db, base) is not None:
+        if base and await get_owner_token(session, base) is not None:
             return _render(
                 request,
                 error=(
@@ -174,7 +173,7 @@ async def submit_bot(
                     f"Submit as '{base}' and versioning is handled automatically."
                 ),
             )
-        existing_token = await get_owner_token(db, bot_name)
+        existing_token = await get_owner_token(session, bot_name)
 
         if existing_token:
             if owned.get(bot_name) != existing_token:
@@ -186,14 +185,21 @@ async def submit_bot(
         else:
             owner_token = secrets.token_hex(32)
 
-        version = await get_next_version(db, bot_name)
+        version = await get_next_version(session, bot_name)
         name = versioned_name(bot_name, version)
-        file_path = BOTS_DIR / f"{name}.py"
+        version_suffix = "" if version == 1 else f"V{version}"
+        file_path = BOTS_DIR / f"{safe_filename_base(bot_name)}{version_suffix}.py"
         file_path.write_text(source)
         await insert_bot(
-            db, bot_name, name, version, owner_token, str(file_path), python_version
+            session,
+            bot_name,
+            name,
+            version,
+            owner_token,
+            str(file_path),
+            python_version,
         )
-        bots = await list_bots(db)
+        bots = await list_bots(session)
 
     owned[bot_name] = owner_token
     response = templates.TemplateResponse(
@@ -216,9 +222,8 @@ def _render(request: Request, **ctx: Any) -> HTMLResponse:
 
 @app.get("/leaderboard", response_class=HTMLResponse)
 async def leaderboard(request: Request) -> HTMLResponse:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        rows = await get_leaderboard(db)
+    async with get_session() as session:
+        rows = await get_leaderboard(session)
     return templates.TemplateResponse(request, "leaderboard.html", {"rows": rows})
 
 
@@ -226,10 +231,9 @@ async def leaderboard(request: Request) -> HTMLResponse:
 async def matches(
     request: Request, bot: str | None = Query(default=None)
 ) -> HTMLResponse:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        rows = await list_matches(db, bot_name=bot)
-        bot_names = await list_bot_names(db)
+    async with get_session() as session:
+        rows = await list_matches(session, bot_name=bot)
+        bot_names = await list_bot_names(session)
     return templates.TemplateResponse(
         request,
         "matches.html",
@@ -237,14 +241,40 @@ async def matches(
     )
 
 
+@app.get("/bots/{base_name}", response_class=HTMLResponse)
+async def bot_family(request: Request, base_name: str) -> HTMLResponse:
+    async with get_session() as session:
+        versions = await get_bot_family(session, base_name)
+        if not versions:
+            return templates.TemplateResponse(request, "404.html", {}, status_code=404)
+        matches = await list_matches(session, bot_name=base_name)
+
+    # Group matches by which version of this family participated.
+    # A match where both sides are in the family (different versions) shows
+    # up under both; a true self-match (same versioned_name on both sides)
+    # shows up once.
+    versioned_names = {v.versioned_name for v in versions}
+    grouped: dict[str, list[Any]] = {v.versioned_name: [] for v in versions}
+    for m in matches:
+        if m.bot_x in versioned_names:
+            grouped[m.bot_x].append(m)
+        if m.bot_o in versioned_names and m.bot_o != m.bot_x:
+            grouped[m.bot_o].append(m)
+
+    return templates.TemplateResponse(
+        request,
+        "bot_detail.html",
+        {"base_name": base_name, "versions": versions, "grouped_matches": grouped},
+    )
+
+
 @app.get("/matches/{match_id}", response_class=HTMLResponse)
 async def match_detail(request: Request, match_id: int) -> HTMLResponse:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        match = await get_match(db, match_id)
+    async with get_session() as session:
+        match = await get_match(session, match_id)
         if match is None:
             return templates.TemplateResponse(request, "404.html", {}, status_code=404)
-        moves = await get_moves(db, match_id)
+        moves = await get_moves(session, match_id)
     return templates.TemplateResponse(
         request, "match_detail.html", {"match": match, "moves": moves}
     )

@@ -274,11 +274,45 @@ def test_matches_dropdown_preselects_filtered_bot(client, db_path):
     assert "selected" not in beta_section
 
 
-def test_leaderboard_bot_name_links_to_filtered_matches(client, db_path):
+def test_leaderboard_bot_name_links_to_bot_detail(client, db_path):
     db_insert_bot(db_path, "AlphaBot")
 
     resp = client.get("/leaderboard")
-    assert "/matches?bot=AlphaBot" in resp.text
+    assert "/bots/AlphaBot" in resp.text
+
+
+def test_leaderboard_shows_only_latest_version_per_family(client, db_path):
+    """When MyBot has V1 and V2, only V2 appears as a leaderboard row."""
+    db_insert_bot(db_path, "MyBot", submitted_at="2024-01-01 10:00:00")
+    # Manually insert a V2 using raw SQL since the helper assumes v1.
+    import sqlite3
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """INSERT INTO bots
+           (base_name, versioned_name, version,
+            owner_token, file_path, python_version, submitted_at)
+           VALUES (?, ?, 2, ?, ?, ?, ?)""",
+        ("MyBot", "MyBotV2", "tok", "/bots/MyBotV2.py", "3", "2024-01-02 10:00:00"),
+    )
+    conn.commit()
+    conn.close()
+
+    resp = client.get("/leaderboard")
+    # MyBotV2 appears as the bot name; MyBot (V1) is not its own row.
+    assert ">MyBotV2<" in resp.text
+    assert "<a href=\"/bots/MyBot\">MyBotV2</a>" in resp.text
+
+
+def test_leaderboard_shows_lifetime_column(client, db_path):
+    a = db_insert_bot(db_path, "AlphaBot")
+    b = db_insert_bot(db_path, "BetaBot")
+    db_insert_match(db_path, a, b, winner_id=a, result="x_wins")
+
+    resp = client.get("/leaderboard")
+    assert "Lifetime" in resp.text
+    # AlphaBot's lifetime row should show 1-0; BetaBot's should show 0-1.
+    assert "1&ndash;0" in resp.text
+    assert "0&ndash;1" in resp.text
 
 
 # ---------------------------------------------------------------------------
@@ -395,3 +429,105 @@ def test_match_detail_back_link_present(client, db_path):
 
     resp = client.get(f"/matches/{match_id}")
     assert "/matches" in resp.text
+
+
+# ---------------------------------------------------------------------------
+# Bot family detail (/bots/{base_name})
+# ---------------------------------------------------------------------------
+
+
+def _insert_versioned(db_path, base_name, version, submitted_at):
+    """Insert a specific version of a bot family."""
+    import sqlite3
+    conn = sqlite3.connect(db_path)
+    versioned = base_name if version == 1 else f"{base_name}V{version}"
+    conn.execute(
+        """INSERT INTO bots
+           (base_name, versioned_name, version,
+            owner_token, file_path, python_version, submitted_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (
+            base_name, versioned, version, f"tok-{version}",
+            f"/bots/{versioned}.py", "3", submitted_at,
+        ),
+    )
+    bot_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.commit()
+    conn.close()
+    return bot_id
+
+
+def test_bot_family_404_for_unknown_base_name(client):
+    resp = client.get("/bots/NoSuchBot")
+    assert resp.status_code == 404
+
+
+def test_bot_family_lists_all_versions_latest_first(client, db_path):
+    _insert_versioned(db_path, "MyBot", 1, "2024-01-01 10:00:00")
+    _insert_versioned(db_path, "MyBot", 2, "2024-01-02 10:00:00")
+    _insert_versioned(db_path, "MyBot", 3, "2024-01-03 10:00:00")
+
+    resp = client.get("/bots/MyBot")
+    assert resp.status_code == 200
+    body = resp.text
+    # Each version has its own <h3> section header.
+    assert "<h3>MyBotV3</h3>" in body
+    assert "<h3>MyBotV2</h3>" in body
+    assert "<h3>MyBot</h3>" in body
+    v3 = body.index("<h3>MyBotV3</h3>")
+    v2 = body.index("<h3>MyBotV2</h3>")
+    v1 = body.index("<h3>MyBot</h3>")
+    assert v3 < v2 < v1
+
+
+def test_bot_family_groups_matches_under_each_version(client, db_path):
+    v1 = _insert_versioned(db_path, "MyBot", 1, "2024-01-01 10:00:00")
+    v2 = _insert_versioned(db_path, "MyBot", 2, "2024-01-02 10:00:00")
+    other = db_insert_bot(db_path, "OtherBot")
+
+    # V1 plays Other (V1 wins); V2 plays Other (Other wins).
+    db_insert_match(db_path, v1, other, winner_id=v1, result="x_wins",
+                    played_at="2024-01-05 10:00:00")
+    db_insert_match(db_path, v2, other, winner_id=other, result="o_wins",
+                    played_at="2024-01-06 10:00:00")
+
+    resp = client.get("/bots/MyBot")
+    body = resp.text
+
+    # Both result labels appear and the V2 section precedes the V1 section.
+    assert "OtherBot won" in body  # V2's loss
+    assert "MyBot won" in body  # V1's win — result label uses the X-side bot name
+    assert body.index("<h3>MyBotV2</h3>") < body.index("<h3>MyBot</h3>")
+
+
+def test_bot_family_shows_empty_state_for_version_with_no_matches(client, db_path):
+    _insert_versioned(db_path, "Lonely", 1, "2024-01-01 10:00:00")
+    resp = client.get("/bots/Lonely")
+    assert "No matches yet" in resp.text
+
+
+def test_bot_family_intra_family_match_appears_under_both_versions(client, db_path):
+    """A match between V1 and V2 of the same family is shown under each
+    version's section so the row appears twice on the page."""
+    v1 = _insert_versioned(db_path, "MyBot", 1, "2024-01-01 10:00:00")
+    v2 = _insert_versioned(db_path, "MyBot", 2, "2024-01-02 10:00:00")
+    db_insert_match(db_path, v1, v2, winner_id=v2, result="o_wins")
+
+    resp = client.get("/bots/MyBot")
+    body = resp.text
+    # The result label "MyBotV2 won" should appear exactly twice — once in
+    # each version's section.
+    assert body.count("MyBotV2 won") == 2
+
+
+def test_matches_filter_by_base_name_includes_all_versions(client, db_path):
+    v1 = _insert_versioned(db_path, "MyBot", 1, "2024-01-01 10:00:00")
+    v2 = _insert_versioned(db_path, "MyBot", 2, "2024-01-02 10:00:00")
+    other = db_insert_bot(db_path, "OtherBot")
+    db_insert_match(db_path, v1, other, winner_id=v1, result="x_wins")
+    db_insert_match(db_path, v2, other, winner_id=v2, result="x_wins")
+
+    resp = client.get("/matches?bot=MyBot")
+    # Both versions' matches show up in the flat list.
+    assert "MyBot won" in resp.text  # V1 row
+    assert "MyBotV2 won" in resp.text  # V2 row

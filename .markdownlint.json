@@ -1,0 +1,4 @@
+{
+  "//": "Kept in sync with [tool.pymarkdown] in pyproject.toml. LazyVim's markdownlint LSP reads this file; pymarkdown reads pyproject.toml.",
+  "MD013": false
+}

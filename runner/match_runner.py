@@ -1,4 +1,3 @@
-import asyncio
 import signal
 import sqlite3
 import subprocess
@@ -8,7 +7,7 @@ import types
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from db.database import DB_PATH, init_db
+from db.database import DB_PATH
 from runner.engine import MatchResult, play_match
 
 POLL_INTERVAL = 5
@@ -94,7 +93,6 @@ def run(db_path: str = DB_PATH, poll_interval: int = POLL_INTERVAL) -> None:
     signal.signal(signal.SIGTERM, _handle_signal)
 
     print("Runner started. Press Ctrl+C to stop.")
-    asyncio.run(init_db())
     pull_images(db_path)
 
     pulled_versions: set[str] = set()
@@ -108,12 +106,12 @@ def run(db_path: str = DB_PATH, poll_interval: int = POLL_INTERVAL) -> None:
         if new_versions:
             pull_images(db_path)
             pulled_versions = unique_python_versions(db_path)
-        for bot_x_id, bot_x_path, bot_x_python, bot_o_id, bot_o_path, bot_o_python in pairs:
+        for x_id, x_path, x_py, o_id, o_path, o_py in pairs:
             if shutdown:
                 break
-            print(f"Running: bot {bot_x_id} (X, py{bot_x_python}) vs bot {bot_o_id} (O, py{bot_o_python})")
-            result = play_match(bot_x_path, bot_o_path, bot_x_python, bot_o_python, BOT_TIMEOUT)
-            record_match(db_path, bot_x_id, bot_o_id, result)
+            print(f"Running: bot {x_id} (X, py{x_py}) vs bot {o_id} (O, py{o_py})")
+            result = play_match(x_path, o_path, x_py, o_py, BOT_TIMEOUT)
+            record_match(db_path, x_id, o_id, result)
             print(f"  Result: {result.result}")
 
     print("Runner stopped.")

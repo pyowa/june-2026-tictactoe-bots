@@ -7,8 +7,6 @@ import pytest
 
 from runner.engine import (
     Board,
-    MatchResult,
-    Move,
     board_to_str,
     check_winner,
     parse_board,
@@ -171,7 +169,8 @@ def test_validate_move_wrong_symbol() -> None:
 def test_run_bot_uses_docker_image(tmp_path: Path) -> None:
     path = write_bot(tmp_path, "bot.py", "")
     valid_board = "X|.|.\n.|.|.\n.|.|."
-    with patch("runner.engine.subprocess.run", return_value=make_proc(valid_board)) as mock_run:
+    proc = make_proc(valid_board)
+    with patch("runner.engine.subprocess.run", return_value=proc) as mock_run:
         run_bot(path, "X", b(EMPTY), python_version="3.11")
     cmd = mock_run.call_args[0][0]
     assert "python:3.11" in cmd
@@ -181,7 +180,8 @@ def test_run_bot_uses_docker_image(tmp_path: Path) -> None:
 def test_run_bot_mounts_bot_file(tmp_path: Path) -> None:
     path = write_bot(tmp_path, "bot.py", "")
     valid_board = "X|.|.\n.|.|.\n.|.|."
-    with patch("runner.engine.subprocess.run", return_value=make_proc(valid_board)) as mock_run:
+    proc = make_proc(valid_board)
+    with patch("runner.engine.subprocess.run", return_value=proc) as mock_run:
         run_bot(path, "X", b(EMPTY))
     cmd = mock_run.call_args[0][0]
     volume_idx = cmd.index("--volume")
@@ -192,7 +192,8 @@ def test_run_bot_mounts_bot_file(tmp_path: Path) -> None:
 def test_run_bot_disables_network(tmp_path: Path) -> None:
     path = write_bot(tmp_path, "bot.py", "")
     valid_board = "X|.|.\n.|.|.\n.|.|."
-    with patch("runner.engine.subprocess.run", return_value=make_proc(valid_board)) as mock_run:
+    proc = make_proc(valid_board)
+    with patch("runner.engine.subprocess.run", return_value=proc) as mock_run:
         run_bot(path, "X", b(EMPTY))
     cmd = mock_run.call_args[0][0]
     assert "--network" in cmd
@@ -220,7 +221,9 @@ def test_run_bot_empty_output(tmp_path: Path) -> None:
 
 def test_run_bot_empty_output_includes_stderr(tmp_path: Path) -> None:
     path = write_bot(tmp_path, "bot.py", "")
-    proc = CompletedProcess(args=[], returncode=1, stdout="", stderr="NameError: name 'x' is not defined")
+    proc = CompletedProcess(
+        args=[], returncode=1, stdout="", stderr="NameError: name 'x' is not defined"
+    )
     with patch("runner.engine.subprocess.run", return_value=proc):
         new_board, error = run_bot(path, "X", b(EMPTY))
     assert new_board is None

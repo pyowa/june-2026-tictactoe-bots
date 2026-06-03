@@ -6,13 +6,12 @@ Clears all existing bots, matches, and moves before inserting seed data.
 Run with: uv run python scripts/seed.py
 """
 
-import asyncio
 import sqlite3
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from db.database import DB_PATH, init_db
+from db.database import DB_PATH
 
 # ---------------------------------------------------------------------------
 # Board helpers
@@ -115,7 +114,6 @@ def insert_match(
 
 
 def main():
-    asyncio.run(init_db())
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
 
