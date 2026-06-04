@@ -163,7 +163,7 @@ sequenceDiagram
     participant Worker as Turn worker (py3)
 
     RMQ->>Orch: deliver MatchJob from matches.todo
-    Orch->>DB: SELECT source for X & O
+    Orch->>DB: get bots
 
     loop For each turn (up to 9)
         Orch->>RMQ: publish turn request<br/>(turn.py3.requests, with correlation_id)
