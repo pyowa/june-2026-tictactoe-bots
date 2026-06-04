@@ -41,6 +41,12 @@ When your change touches any of the below, update the docs **in the same change*
 - Add a new top-level dependency without a real need. If you do need one, add it to `pyproject.toml` and run `uv sync`, and explain why in your response.
 - Introduce a new technology (queueing system, ORM, test framework, web framework) when an existing one in this project would do.
 
+## Docker compose hygiene (during agent runs)
+
+- If your task involves `docker compose up` (foreground or detached), end the task with `docker compose down` from the same directory you started it in. Leaving containers running on the host's Docker daemon collides with anything else using the same image/container names and forces the user to clean up by hand.
+- If you need persistent state across multiple test cycles, use `docker compose down` between cycles too — it's cheap (~3 seconds) and removes the "did I leave anything dirty" question entirely.
+- The compose file no longer pins `container_name:` on any service, so each compose project (parent checkout, agent worktree, etc.) gets its own auto-generated container names. That means parallel runs are safe *as long as* you clean up your own containers when finished. Don't rely on the host's name-collision detection to flag misuse.
+
 ## When you hit something unexpected
 
 - Investigate the root cause. Don't paper over symptoms — if a test fails after your change, work out whether the test was right or the code was right before "fixing" either.

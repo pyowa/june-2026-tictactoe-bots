@@ -92,7 +92,7 @@ git clone <repo>
 cd tic-tac-toe-event
 uv sync --group dev
 
-uv run poe up           # build + start the whole stack (db, rabbitmq, web, orchestrator, worker)
+uv run poe up           # build + start the whole stack (db, rabbitmq, web, orchestrator, the worker fleet)
 uv run poe migrate      # apply the schema against the running Postgres
 ```
 
@@ -104,9 +104,9 @@ Defaults: Postgres at `postgresql+asyncpg://ttt:ttt@localhost:5432/ttt`, RabbitM
 uv run poe start
 ```
 
-`poe start` is `docker compose up` in the foreground — web, orchestrator, worker, Postgres, and RabbitMQ all come up together. Open `http://localhost:8000`. Ctrl+C stops them. `uv run poe down` stops everything in the background-detached case. RabbitMQ's management UI is at `http://localhost:15672` (`guest`/`guest`).
+`poe start` is `docker compose up` in the foreground — web, orchestrator, the per-Python-version turn workers, Postgres, and RabbitMQ all come up together. Open `http://localhost:8000`. Ctrl+C stops them. `uv run poe down` stops everything in the background-detached case. RabbitMQ's management UI is at `http://localhost:15672` (`guest`/`guest`).
 
-Source code is bind-mounted into the containers, so editing files under `web/`, `runner/`, `db/`, or `messaging/` is picked up immediately by the web server's `--reload`. The orchestrator and worker don't auto-reload — restart them with `docker compose restart orchestrator worker` after editing their code. Only `pyproject.toml` / `uv.lock` changes require a `docker compose build`.
+Source code is bind-mounted into the containers, so editing files under `web/`, `runner/`, `db/`, or `messaging/` is picked up immediately by the web server's `--reload`. The orchestrator and workers don't auto-reload — restart them with `docker compose restart orchestrator worker-py310 worker-py311 worker-py312 worker-py313 worker-py314` after editing their code. Only `pyproject.toml` / `uv.lock` changes require a `docker compose build`.
 
 ---
 
@@ -114,7 +114,7 @@ Source code is bind-mounted into the containers, so editing files under `web/`, 
 
 ### Local architecture
 
-Everything runs in Docker Compose: `db` (Postgres), `rabbitmq`, `web`, `orchestrator`, and `worker`. The browser talks to the web; everything else talks via Postgres + RabbitMQ. Services find each other by service name (`db`, `rabbitmq`) over the compose network. Externally only the broker ports, the DB port, and `http://localhost:8000` are exposed.
+Everything runs in Docker Compose: `db` (Postgres), `rabbitmq`, `web`, `orchestrator`, and one `worker-pyX.Y` service per supported Python version (currently 3.10 through 3.14). The browser talks to the web; everything else talks via Postgres + RabbitMQ. Services find each other by service name (`db`, `rabbitmq`) over the compose network. Externally only the broker ports, the DB port, and `http://localhost:8000` are exposed.
 
 #### 1. Uploading a bot
 
@@ -162,13 +162,13 @@ sequenceDiagram
     participant RMQ as RabbitMQ
     participant Orch as Orchestrator
     participant DB as Postgres
-    participant Worker as Turn worker (py3)
+    participant Worker as Turn worker (pyX.Y)
 
     RMQ->>Orch: deliver MatchJob from matches.todo
     Orch->>DB: get bots
 
     loop For each turn (up to 9)
-        Orch->>RMQ: publish turn request<br/>(turn.py3.requests, with correlation_id)
+        Orch->>RMQ: publish turn request<br/>(turn.pyXY.requests, with correlation_id)
         RMQ->>Worker: deliver
         Worker->>Worker: write tmpfile,<br/>run `python bot.py`<br/>(stdin = board, timeout)
         Worker->>RMQ: publish reply<br/>(orchestrator's reply queue)
@@ -180,7 +180,7 @@ sequenceDiagram
     Orch->>RMQ: ack matches.todo message
 ```
 
-Web, orchestrator, and worker all run as compose services alongside Postgres and RabbitMQ — built from a single multi-stage `Dockerfile` with three targets (`web`, `orchestrator`, `worker`). The orchestrator is Python-version-agnostic; each turn worker is bound to one Python version (currently just `py3.13`). Adding more versions = adding more worker services consuming their own `turn.pyX.Y.requests` queue.
+Web, orchestrator, and the worker fleet all run as compose services alongside Postgres and RabbitMQ — built from a single multi-stage `Dockerfile` with three targets (`web`, `orchestrator`, `worker`). The orchestrator is Python-version-agnostic; each turn worker is bound to one Python version and only consumes its own `turn.pyXY.requests` queue. The compose file declares one `worker-pyX.Y` service per supported version (3.10, 3.11, 3.12, 3.13, 3.14), each built from the same `worker` target but with a different `PY_VERSION` build arg so its base image matches its queue. Adding another version means adding one more `worker-pyX.Y` block and listing the version in `web/main.py`'s `SUPPORTED_PYTHON_VERSIONS`.
 
 ### Project layout
 
@@ -195,7 +195,7 @@ tic-tac-toe-event/
 └── tests/          # Test suite
 ```
 
-Stack: FastAPI · SQLAlchemy 2.x (async, `asyncpg`) on Postgres · RabbitMQ (`aio-pika`) for match queueing + per-turn RPC · Alembic for migrations · Docker Compose for the entire stack (Postgres, RabbitMQ, web, orchestrator, worker) — web/orchestrator/worker built from a single multi-stage `Dockerfile`. Tests use a recording in-memory queue and an isolated `ttt_test` database on the running Postgres.
+Stack: FastAPI · SQLAlchemy 2.x (async, `asyncpg`) on Postgres · RabbitMQ (`aio-pika`) for match queueing + per-turn RPC · Alembic for migrations · Docker Compose for the entire stack (Postgres, RabbitMQ, web, orchestrator, one turn worker per supported Python version) — web/orchestrator/worker built from a single multi-stage `Dockerfile`. Tests use a recording in-memory queue and an isolated `ttt_test` database on the running Postgres.
 
 ### Common tasks
 

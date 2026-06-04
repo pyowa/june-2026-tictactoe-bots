@@ -1,7 +1,29 @@
+# Shared bits for the per-Python-version turn workers. Each `worker-pyX.Y`
+# service merges this anchor and overrides only `PY_VERSION` (build arg) and
+# `WORKER_PYTHON_VERSION` (env). Keeping the queue name (via
+# `WORKER_PYTHON_VERSION`) aligned with the image's actual interpreter
+# (`PY_VERSION`) is the whole point of the fleet — the previous single
+# worker fudged this and ran py3.14-targeted code on py3.13.
+x-worker-base: &worker-base
+  build:
+    context: .
+    target: worker
+  environment: &worker-env
+    RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+  depends_on:
+    rabbitmq:
+      condition: service_healthy
+  volumes:
+    - ./web:/app/web
+    - ./runner:/app/runner
+    - ./db:/app/db
+    - ./messaging:/app/messaging
+    - ./alembic:/app/alembic
+    - ./alembic.ini:/app/alembic.ini
+
 services:
   db:
     image: postgres:latest
-    container_name: ttt-postgres
     environment:
       POSTGRES_USER: ttt
       POSTGRES_PASSWORD: ttt
@@ -20,7 +42,6 @@ services:
 
   rabbitmq:
     image: rabbitmq:3-management
-    container_name: ttt-rabbitmq
     ports:
       - "5672:5672"    # AMQP
       - "15672:15672"  # management UI: http://localhost:15672 (guest/guest)
@@ -36,7 +57,6 @@ services:
       target: web
       args:
         PY_VERSION: "3.13"
-    container_name: ttt-web
     environment:
       DATABASE_URL: postgresql+asyncpg://ttt:ttt@db:5432/ttt
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
@@ -66,7 +86,6 @@ services:
       target: orchestrator
       args:
         PY_VERSION: "3.13"
-    container_name: ttt-orchestrator
     environment:
       DATABASE_URL: postgresql+asyncpg://ttt:ttt@db:5432/ttt
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
@@ -83,31 +102,58 @@ services:
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini
 
-  worker:
+  # Per-Python-version turn workers. Each consumes only its own
+  # `turn.pyXY.requests` queue (selected by WORKER_PYTHON_VERSION) and the
+  # image's interpreter matches that version exactly.
+  worker-py310:
+    <<: *worker-base
     build:
       context: .
       target: worker
-      args:
-        PY_VERSION: "3.13"
-    container_name: ttt-worker
+      args: { PY_VERSION: "3.10" }
     environment:
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
-      # The image is python:3.13-slim, but until the multi-Python worker
-      # fleet (next TODO bullet) lands, this single worker also handles
-      # the default version that bots inherit when their docstring omits
-      # `python:` — currently 3.14. Bots that don't depend on 3.14-only
-      # syntax run fine on the actual 3.13 interpreter inside.
+      <<: *worker-env
+      WORKER_PYTHON_VERSION: "3.10"
+
+  worker-py311:
+    <<: *worker-base
+    build:
+      context: .
+      target: worker
+      args: { PY_VERSION: "3.11" }
+    environment:
+      <<: *worker-env
+      WORKER_PYTHON_VERSION: "3.11"
+
+  worker-py312:
+    <<: *worker-base
+    build:
+      context: .
+      target: worker
+      args: { PY_VERSION: "3.12" }
+    environment:
+      <<: *worker-env
+      WORKER_PYTHON_VERSION: "3.12"
+
+  worker-py313:
+    <<: *worker-base
+    build:
+      context: .
+      target: worker
+      args: { PY_VERSION: "3.13" }
+    environment:
+      <<: *worker-env
+      WORKER_PYTHON_VERSION: "3.13"
+
+  worker-py314:
+    <<: *worker-base
+    build:
+      context: .
+      target: worker
+      args: { PY_VERSION: "3.14" }
+    environment:
+      <<: *worker-env
       WORKER_PYTHON_VERSION: "3.14"
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    volumes:
-      - ./web:/app/web
-      - ./runner:/app/runner
-      - ./db:/app/db
-      - ./messaging:/app/messaging
-      - ./alembic:/app/alembic
-      - ./alembic.ini:/app/alembic.ini
 
 volumes:
   ttt-pgdata:
