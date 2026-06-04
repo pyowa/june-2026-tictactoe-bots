@@ -1,6 +1,6 @@
 # Go-Forward Plan: Azure Deployment
 
-Migration plan to move the app from a single-host SQLite + local Docker setup to an event-driven Azure architecture. Ordered so each step is independently testable, with Azure provisioning happening only after the local refactors land.
+Migration plan to move the app from a single-host (local Postgres + local Docker) setup to an event-driven Azure architecture. Ordered so each step is independently testable, with Azure provisioning happening only after the local refactors land.
 
 ## Target architecture
 
@@ -8,9 +8,10 @@ Migration plan to move the app from a single-host SQLite + local Docker setup to
 |---|---|---|
 | Web app | Azure Container Apps | Containerized FastAPI, scale-to-zero |
 | Database | Azure Database for PostgreSQL Flexible Server | B-series for the event scale |
-| Bot file storage | Azure Blob Storage | Replaces the local `bots/` directory |
+| Bot file storage | (no separate service — source lives in the `bots.source` BYTEA column on Postgres) | Sized for event volume; ~10 KB per bot |
 | Match queueing | Azure Service Bus | One message per `(bot_x, bot_o)` pair |
-| Match execution | Azure Container Apps Jobs | KEDA scales jobs from Service Bus depth — each match is one job execution |
+| Match orchestration | Azure Container Apps (long-running worker, KEDA-scaled) | Consumes the match queue, drives the per-turn RPC loop, records results |
+| Per-turn bot execution | N Azure Container Apps (one per supported Python version) | Each is the same code on `python:X.Y`; consumes its own turn queue and runs the bot as a subprocess |
 | Secrets | Azure Key Vault | DB string, storage keys, Service Bus connection |
 | Logs / metrics | Application Insights | OpenTelemetry instrumentation for FastAPI |
 | CI/CD | GitHub Actions → `az containerapp update` | Last step, not first |
@@ -19,46 +20,48 @@ Migration plan to move the app from a single-host SQLite + local Docker setup to
 
 ```text
 Browser ─upload─► Web (Container App)
-                    ├─► Blob (bot .py)
-                    ├─► Postgres (bot row)
-                    └─► Service Bus (enqueue unplayed pairs)
-                                     │
-                          KEDA scaler ─► Container Apps Job
-                                           ├─► fetch bots from Blob
-                                           ├─► run match in job container
-                                           └─► write result to Postgres
+                    ├─► Postgres (bot row + source bytes)
+                    └─► matches.todo  (one message per unplayed pair)
+
+           matches.todo ─► Orchestrator (Container App, KEDA-scaled)
+                              │  fetches source bytes for both bots from Postgres
+                              │  for each turn:
+                              ├──► RPC turn.py3.11.requests  ◄─► Worker py3.11
+                              ├──► RPC turn.py3.12.requests  ◄─► Worker py3.12
+                              ├──► ... (one queue + worker per supported version)
+                              │
+                              └──► Postgres (matches + moves)
+
 Browser ─poll─► Web (Container App) ─► Postgres
 ```
 
-The runner stops polling. Pairs are enqueued at submission time; the job consumer drains the queue.
+The orchestrator is Python-version-agnostic — it just drives the game loop and dispatches each turn to the right per-version worker queue via RPC (correlation IDs on a reply queue). Workers run the bot as a subprocess inside their own container, so per-turn isolation is preserved without nested Docker.
 
 ## Foundation already in place
 
 These weren't separate line items in the original plan but are prerequisites the upcoming Azure work depends on, and they're done:
 
-- [x] **Async ORM** — `aiosqlite` is now driven through SQLAlchemy 2.x async. The DB layer in `db/database.py` is engine-agnostic; swapping to Postgres is a connection-string change at the engine-creation boundary.
-- [x] **Alembic-managed schema** — `schema.sql` is gone; `db/models/` + `alembic/versions/` own the schema. The SQLAlchemy types are portable; regenerating migrations against Postgres would produce equivalent DDL.
-- [x] **Test coverage backstop** — 100% line coverage on `web/`, `db/`, and `runner/` with `sys.monitoring` tracer. Gives a solid regression net for the engine swap.
+- [x] **Async ORM on Postgres** — FastAPI uses SQLAlchemy 2.x async with `asyncpg`. `aiosqlite` is removed. The runner uses a SQLAlchemy sync engine via `psycopg2`.
+- [x] **Alembic-managed schema** — `schema.sql` is gone; `db/models/` + `alembic/versions/` own the schema. Server defaults use `CURRENT_TIMESTAMP` for portability.
+- [x] **Test coverage backstop** — 100% line coverage on `web/`, `db/`, and `runner/` with the `sys.monitoring` tracer.
 
 ## Migration steps
 
 ### Phase 1 — Local refactors (no Azure required)
 
-- **SQLite → Postgres** (partially done)
+- **SQLite → Postgres** (done)
   - [x] Swap `aiosqlite` driver for SQLAlchemy 2.x async
   - [x] Move schema definition from raw SQL to ORM models managed by Alembic
-  - [ ] Add a Postgres service to `docker-compose.yml` and switch the engine URL via env var
-  - [ ] Update `tests/conftest.py` to spin up a Postgres test DB (testcontainers is the cleanest path)
-  - [ ] Regenerate the initial Alembic migration against Postgres to capture any type differences
-- [ ] **Abstract bot storage** behind a `BotStore` interface with two implementations:
-  - `LocalBotStore` — writes to `bots/` (current behavior, for dev).
-  - `BlobBotStore` — writes to Azure Blob (used in production).
-  - Select via env var.
-- [ ] **Event-driven runner.** Replace `find_unplayed_pairs` polling with a queue consumer.
-  - On bot submission, web enqueues one message per `(bot_x_id, bot_o_id)` pair (including self-pair).
-  - Runner consumes one message → runs one match → writes result → acks message.
-  - For local dev use a Service Bus emulator or RabbitMQ in `docker-compose.yml`.
-- [ ] **Two Dockerfiles** — one for web, one for the job runner. Multi-stage builds with `uv` for fast installs.
+  - [x] Add a Postgres service to `docker-compose.yml` and switch the engine URL via `DATABASE_URL`
+  - [x] Make timestamp defaults portable (`func.current_timestamp()`)
+  - [x] Convert the runner from raw `sqlite3` to a SQLAlchemy sync engine
+  - [x] Tests share the local `docker compose` Postgres but live in their own `ttt_test` database; per-test isolation via `TRUNCATE`. SQLite removed from the codebase entirely.
+- [x] **Bot source moved into Postgres** (`bots.source` BYTEA). Web writes bytes on upload; the local `bots/` directory is now a debug-only mirror that the legacy polling runner still consumes. Workers will read source straight from the DB / RPC payload, no shared filesystem needed. Replaces the originally-planned `BotStore` abstraction since DB-resident source removes the need for it at this scale.
+- **Move from polling to event-driven (RPC-over-queue)** — done in slices:
+  - [x] **Broker + queue abstraction.** RabbitMQ in `docker-compose.yml`. Thin `Queue` interface with a RabbitMQ implementation. Web enqueues a `MatchJob(bot_x_id, bot_o_id, python_version)` per unplayed pair on bot submission.
+  - [x] **Orchestrator + turn workers.** `runner/orchestrator.py` consumes `matches.todo`, fetches bot sources from Postgres, drives the per-turn RPC loop, persists results. `runner/turn_worker.py` consumes its per-version queue, runs the bot source as a subprocess, replies. Polling runner retired.
+  - [ ] **Multi-Python worker fleet in compose.** Today we run one worker (py3) on the host. Promote to compose with one service per supported Python version (`matcher-py311`, `matcher-py312`, ...), all built from a shared `Dockerfile.worker` with a `PY_VERSION` build arg.
+- [ ] **Dockerfiles for web, orchestrator, and the worker base image** — multi-stage builds with `uv` for fast installs.
 
 ### Phase 2 — Azure provisioning (portal/CLI, not IaC yet)
 
@@ -86,7 +89,7 @@ If you want explicit Kubernetes practice, replace **only the runner** with an AK
 - Cosmos DB — data is relational.
 - API Management / Front Door / multi-region — overkill at this scale.
 - Bicep/Terraform before manual provisioning works.
-- Migrating the SQLite-using tests to mocks — keep them hitting a real Postgres.
+- Replacing tests' real DB hits with mocks — keep them hitting a real Postgres.
 
 ## Cost estimate
 

@@ -13,6 +13,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from db.database import (
     get_bot_family,
     get_leaderboard,
@@ -26,10 +29,8 @@ from db.database import (
     list_bots,
     list_matches,
 )
-
-BOTS_DIR = Path(__file__).parent.parent / "bots"
-BOTS_DIR.mkdir(exist_ok=True)
-
+from db.models import Bot
+from messaging import MatchJob, get_queue, pick_python_version
 
 app = FastAPI()
 app.mount(
@@ -109,17 +110,6 @@ def versioned_name(base_name: str, version: int) -> str:
     return base_name if version == 1 else f"{base_name}V{version}"
 
 
-def safe_filename_base(name: str) -> str:
-    """Sanitize a bot name into a safe filename stem (no extension, no version
-    suffix). Clean ASCII-alphanumeric names are preserved as-is; messy names
-    are reduced to their whitespace-separated all-alphabetic tokens,
-    lowercased and concatenated."""
-    if name.isascii() and name.isalnum():
-        return name
-    tokens = [t.lower() for t in name.split() if t.isascii() and t.isalpha()]
-    return "".join(tokens) or "bot"
-
-
 def parse_cookie(value: str | None) -> dict:
     if not value:
         return {}
@@ -142,7 +132,8 @@ async def submit_bot(
     file: UploadFile = File(...),
     ttt_owned_bots: str | None = Cookie(default=None),
 ) -> HTMLResponse:
-    source = (await file.read()).decode("utf-8", errors="replace")
+    source_bytes = await file.read()
+    source = source_bytes.decode("utf-8", errors="replace")
 
     bot_name = extract_bot_name(source)
     if not bot_name:
@@ -187,18 +178,17 @@ async def submit_bot(
 
         version = await get_next_version(session, bot_name)
         name = versioned_name(bot_name, version)
-        version_suffix = "" if version == 1 else f"V{version}"
-        file_path = BOTS_DIR / f"{safe_filename_base(bot_name)}{version_suffix}.py"
-        file_path.write_text(source)
         await insert_bot(
             session,
             bot_name,
             name,
             version,
             owner_token,
-            str(file_path),
             python_version,
+            source=source_bytes,
         )
+        new_bot_id = await _new_bot_id(session, name)
+        await _enqueue_match_pairs(session, new_bot_id, python_version)
         bots = await list_bots(session)
 
     owned[bot_name] = owner_token
@@ -218,6 +208,29 @@ async def submit_bot(
 
 def _render(request: Request, **ctx: Any) -> HTMLResponse:
     return templates.TemplateResponse(request, "index.html", {"bots": [], **ctx})
+
+
+async def _new_bot_id(session: AsyncSession, versioned_name: str) -> int:
+    result = await session.execute(
+        select(Bot.id).where(Bot.versioned_name == versioned_name)
+    )
+    return result.scalar_one()
+
+
+async def _enqueue_match_pairs(
+    session: AsyncSession, new_bot_id: int, new_python_version: str
+) -> None:
+    """Enqueue one MatchJob per unplayed pair involving the newly inserted
+    bot. Includes the self-pair (`new` vs `new`). The chosen Python version
+    is `max(new, other)` so older bots run on newer interpreters."""
+    queue = get_queue()
+    result = await session.execute(select(Bot.id, Bot.python_version))
+    rows = result.all()
+    for other_id, other_py in rows:
+        py = pick_python_version(new_python_version, other_py)
+        await queue.enqueue_match(MatchJob(new_bot_id, other_id, py))
+        if other_id != new_bot_id:
+            await queue.enqueue_match(MatchJob(other_id, new_bot_id, py))
 
 
 @app.get("/leaderboard", response_class=HTMLResponse)

@@ -3,33 +3,48 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import Engine, create_engine, func, or_, select, text
 from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.pool import NullPool
 
 from db.models import Bot, Match, Move
+from runner.engine import MatchResult
 
-DB_PATH = os.environ.get("TTT_DB_PATH", "ttt.db")
-
-
-def _engine_url(path: str) -> str:
-    return f"sqlite+aiosqlite:///{path}"
+DEFAULT_ASYNC_URL = "postgresql+asyncpg://ttt:ttt@localhost:5432/ttt"
+DATABASE_URL = os.environ.get("DATABASE_URL", DEFAULT_ASYNC_URL)
 
 
-_engine = create_async_engine(_engine_url(DB_PATH))
+def sync_url(async_url: str) -> str:
+    """Convert an async SQLAlchemy URL to its sync counterpart so tools like
+    the runner and Alembic offline mode can reuse the same connection string."""
+    return async_url.replace("+asyncpg", "+psycopg2")
+
+
+_engine = create_async_engine(DATABASE_URL)
 _session_factory = async_sessionmaker(_engine, expire_on_commit=False)
 
 
-def reconfigure(db_path: str) -> None:
-    """Rebind the engine to a new path (used by tests + DB_PATH overrides)."""
-    global _engine, _session_factory, DB_PATH
-    DB_PATH = db_path
-    _engine = create_async_engine(_engine_url(db_path))
+def reconfigure(url: str) -> None:
+    """Rebind the async engine to a new URL (used by tests).
+
+    Uses NullPool so each request gets a fresh connection — avoids asyncpg's
+    'attached to a different loop' errors when tests spin up multiple
+    TestClient instances (each with its own event loop)."""
+    global _engine, _session_factory, DATABASE_URL
+    DATABASE_URL = url
+    _engine = create_async_engine(url, poolclass=NullPool)
     _session_factory = async_sessionmaker(_engine, expire_on_commit=False)
+
+
+def create_sync_engine() -> Engine:
+    """A fresh sync engine bound to the current `DATABASE_URL` — used by the
+    runner and seed scripts so they speak whichever dialect is configured."""
+    return create_engine(sync_url(DATABASE_URL))
 
 
 @asynccontextmanager
@@ -53,14 +68,51 @@ async def get_next_version(session: AsyncSession, base_name: str) -> int:
     return (current or 0) + 1
 
 
+async def record_match(
+    session: AsyncSession,
+    bot_x_id: int,
+    bot_o_id: int,
+    result: MatchResult,
+) -> None:
+    """Persist a completed match (and its moves) using an async session."""
+    if result.result in ("x_wins", "o_forfeit"):
+        winner_id: int | None = bot_x_id
+    elif result.result in ("o_wins", "x_forfeit"):
+        winner_id = bot_o_id
+    else:
+        winner_id = None
+
+    match = Match(
+        bot_x_id=bot_x_id,
+        bot_o_id=bot_o_id,
+        winner_id=winner_id,
+        result=result.result,
+    )
+    session.add(match)
+    await session.flush()  # populates match.id
+
+    for move in result.moves:
+        bot_id = bot_x_id if move.player == "x" else bot_o_id
+        session.add(
+            Move(
+                match_id=match.id,
+                move_number=move.move_number,
+                bot_id=bot_id,
+                board_state=move.board,
+                error=move.error,
+            )
+        )
+    await session.commit()
+
+
 async def insert_bot(
     session: AsyncSession,
     base_name: str,
     versioned_name: str,
     version: int,
     owner_token: str,
-    file_path: str,
     python_version: str = "3",
+    source: bytes | None = None,
 ) -> None:
     session.add(
         Bot(
@@ -68,8 +120,8 @@ async def insert_bot(
             versioned_name=versioned_name,
             version=version,
             owner_token=owner_token,
-            file_path=file_path,
             python_version=python_version,
+            source=source,
         )
     )
     await session.commit()
@@ -94,49 +146,55 @@ _LEADERBOARD_SQL = text(
         FROM bots b
         JOIN latest_per_family l
           ON l.base_name = b.base_name AND l.max_v = b.version
+    ),
+    stats AS (
+        SELECT
+            lb.base_name,
+            lb.versioned_name,
+            lb.submitted_at,
+            -- Stats for the current (latest) version only.
+            (SELECT COUNT(*) FROM matches m
+             WHERE m.winner_id = lb.id
+               AND m.result IN ('x_wins', 'o_wins')) AS clean_wins,
+            (SELECT COUNT(*) FROM matches m
+             WHERE m.winner_id = lb.id
+               AND m.result IN ('x_forfeit', 'o_forfeit')) AS forfeit_wins,
+            (SELECT COUNT(*) FROM matches m
+             WHERE (m.bot_x_id = lb.id OR m.bot_o_id = lb.id)
+               AND m.result = 'cat') AS draws,
+            (SELECT COUNT(*) FROM matches m
+             WHERE (m.bot_x_id = lb.id OR m.bot_o_id = lb.id)
+               AND m.result != 'cat'
+               AND (m.winner_id IS NULL OR m.winner_id != lb.id)) AS losses,
+            -- Lifetime W/L across every version of this family, excluding
+            -- intra-family matches so a family playing itself doesn't
+            -- inflate both sides.
+            (SELECT COUNT(*) FROM matches m
+             JOIN bots bx ON bx.id = m.bot_x_id
+             JOIN bots bo ON bo.id = m.bot_o_id
+             JOIN bots bw ON bw.id = m.winner_id
+             WHERE bw.base_name = lb.base_name
+               AND (bx.base_name != lb.base_name
+                    OR bo.base_name != lb.base_name)) AS lifetime_wins,
+            (SELECT COUNT(*) FROM matches m
+             JOIN bots bx ON bx.id = m.bot_x_id
+             JOIN bots bo ON bo.id = m.bot_o_id
+             WHERE m.result != 'cat'
+               AND (bx.base_name = lb.base_name
+                    OR bo.base_name = lb.base_name)
+               AND (bx.base_name != lb.base_name
+                    OR bo.base_name != lb.base_name)
+               AND (m.winner_id IS NULL
+                    OR NOT EXISTS (
+                        SELECT 1 FROM bots bw
+                        WHERE bw.id = m.winner_id
+                          AND bw.base_name = lb.base_name
+                    ))) AS lifetime_losses
+        FROM latest_bot lb
     )
-    SELECT
-        lb.base_name,
-        lb.versioned_name,
-        lb.submitted_at,
-        -- Stats for the current (latest) version only.
-        (SELECT COUNT(*) FROM matches m
-         WHERE m.winner_id = lb.id
-           AND m.result IN ('x_wins', 'o_wins')) AS clean_wins,
-        (SELECT COUNT(*) FROM matches m
-         WHERE m.winner_id = lb.id
-           AND m.result IN ('x_forfeit', 'o_forfeit')) AS forfeit_wins,
-        (SELECT COUNT(*) FROM matches m
-         WHERE (m.bot_x_id = lb.id OR m.bot_o_id = lb.id)
-           AND m.result = 'cat') AS draws,
-        (SELECT COUNT(*) FROM matches m
-         WHERE (m.bot_x_id = lb.id OR m.bot_o_id = lb.id)
-           AND m.result != 'cat'
-           AND (m.winner_id IS NULL OR m.winner_id != lb.id)) AS losses,
-        -- Lifetime W/L across every version of this family, excluding
-        -- intra-family matches (one version of MyBot vs. another version
-        -- of MyBot) so a family playing itself doesn't inflate both sides.
-        (SELECT COUNT(*) FROM matches m
-         JOIN bots bx ON bx.id = m.bot_x_id
-         JOIN bots bo ON bo.id = m.bot_o_id
-         JOIN bots bw ON bw.id = m.winner_id
-         WHERE bw.base_name = lb.base_name
-           AND (bx.base_name != lb.base_name
-                OR bo.base_name != lb.base_name)) AS lifetime_wins,
-        (SELECT COUNT(*) FROM matches m
-         JOIN bots bx ON bx.id = m.bot_x_id
-         JOIN bots bo ON bo.id = m.bot_o_id
-         WHERE m.result != 'cat'
-           AND (bx.base_name = lb.base_name OR bo.base_name = lb.base_name)
-           AND (bx.base_name != lb.base_name OR bo.base_name != lb.base_name)
-           AND (m.winner_id IS NULL
-                OR NOT EXISTS (
-                    SELECT 1 FROM bots bw
-                    WHERE bw.id = m.winner_id
-                      AND bw.base_name = lb.base_name
-                ))) AS lifetime_losses
-    FROM latest_bot lb
-    ORDER BY (clean_wins + forfeit_wins) DESC, lb.submitted_at ASC
+    SELECT *
+    FROM stats
+    ORDER BY (clean_wins + forfeit_wins) DESC, submitted_at ASC
     """
 )
 

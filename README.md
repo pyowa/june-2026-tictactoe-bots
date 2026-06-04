@@ -83,7 +83,7 @@ Open the web UI at `http://localhost:8000` and upload your `.py` file. The first
 
 - [uv](https://docs.astral.sh/uv/) (Python package manager)
 - Python 3.11+
-- Docker (used to sandbox each match)
+- Docker (runs Postgres and RabbitMQ locally; also sandboxes each match)
 
 ### Setup
 
@@ -91,8 +91,12 @@ Open the web UI at `http://localhost:8000` and upload your `.py` file. The first
 git clone <repo>
 cd tic-tac-toe-event
 uv sync --group dev
-uv run poe migrate   # creates ttt.db
+
+uv run poe db-up        # start Postgres + RabbitMQ in containers
+uv run poe migrate      # create the schema
 ```
+
+Defaults: Postgres at `postgresql+asyncpg://ttt:ttt@localhost:5432/ttt`, RabbitMQ at `amqp://guest:guest@localhost:5672/`. Override via `DATABASE_URL` / `RABBITMQ_URL`.
 
 ### Start
 
@@ -100,36 +104,72 @@ uv run poe migrate   # creates ttt.db
 uv run poe start
 ```
 
-This launches the web server and the match runner together. Open `http://localhost:8000`. Ctrl+C stops both.
+This launches the web server and the match runner together. Open `http://localhost:8000`. Ctrl+C stops both. `uv run poe db-down` stops Postgres + RabbitMQ. RabbitMQ's management UI is at `http://localhost:15672` (`guest`/`guest`).
 
 ---
 
 ## Developing the App
+
+### Local architecture
+
+```mermaid
+flowchart LR
+    Browser([Browser])
+
+    subgraph host["Host processes (poe start)"]
+        Web["Web<br/>FastAPI<br/>(web/main.py)"]
+        Orch["Orchestrator<br/>(runner/orchestrator.py)"]
+        Worker["Turn worker py3<br/>(runner/turn_worker.py)"]
+    end
+
+    subgraph compose["docker compose"]
+        DB[("Postgres<br/>bots · matches · moves<br/>(bot source bytes live on the bots row — single source of truth)")]
+        RMQ{{"RabbitMQ<br/>matches.todo · turn.py3.requests<br/>+ orchestrator reply queue"}}
+    end
+
+    Browser -- "upload .py" --> Web
+    Browser -- "poll leaderboard / matches" --> Web
+    Web -- "insert bot row + source bytes" --> DB
+    Web -- "publish MatchJob per unplayed pair" --> RMQ
+    Web -- "read leaderboard / matches" --> DB
+
+    RMQ -- "consume matches.todo" --> Orch
+    Orch -- "fetch X & O source by id" --> DB
+    Orch -- "RPC: play this turn (symbol, board, source)" --> Worker
+    Worker -- "reply: new board or error" --> Orch
+    Orch -- "record match + moves" --> DB
+```
+
+The web app and the runner processes all run natively on the host today; only Postgres and RabbitMQ live in containers. The orchestrator is Python-version-agnostic; each turn worker is bound to one Python version (currently just `py3`). Adding more versions = adding more workers consuming their own `turn.pyX.Y.requests` queue.
 
 ### Project layout
 
 ```text
 tic-tac-toe-event/
 ├── web/            # FastAPI app (submission UI, leaderboard, matches)
-├── runner/         # Match orchestration + Docker-sandboxed bot execution
-├── db/             # SQLAlchemy models and async query helpers
+├── runner/         # orchestrator.py (game loop) + turn_worker.py (bot subprocess) + engine.py (pure board logic)
+├── db/             # SQLAlchemy models, async query helpers, bot source stored in `bots.source` BYTEA
+├── messaging/      # Queue + RPC abstraction; RabbitMQ implementation
+├── example_bots/   # Reference bots; `poe seed-examples` loads these into the DB
 ├── alembic/        # Migration scripts (versions/)
-├── bots/           # Submitted bot scripts (created on first upload)
 └── tests/          # Test suite
 ```
 
-Stack: FastAPI · SQLAlchemy 2.x (async) on SQLite · Alembic · Docker for sandboxing.
+Stack: FastAPI · SQLAlchemy 2.x (async) on Postgres · RabbitMQ (`aio-pika`) for match queueing · Alembic · Docker for sandboxing. Tests use a recording in-memory queue and an isolated `ttt_test` database on the running Postgres.
 
 ### Common tasks
 
 | Command | Description |
 |---|---|
-| `uv run poe start` | Web server + match runner together (Ctrl+C stops both) |
+| `uv run poe start` | Web + orchestrator + py3 worker, all in foreground (Ctrl+C stops them) |
 | `uv run poe dev` | Web server only, with auto-reload |
-| `uv run poe runner` | Match runner only |
+| `uv run poe orchestrator` | Match orchestrator only (consumes `matches.todo`, drives RPC game loop) |
+| `uv run poe worker` | Single turn-worker on `turn.pyX.requests` (`WORKER_PYTHON_VERSION` env var, default `3`) |
+| `uv run poe db-up` | Start the Postgres + RabbitMQ containers (`docker compose up -d`) |
+| `uv run poe db-down` | Stop the compose services |
 | `uv run poe migrate` | Apply pending Alembic migrations |
-| `uv run poe reset-db` | Drop and recreate the database (does not touch `bots/`) |
-| `uv run poe seed` | Populate the DB with fake bots and matches |
+| `uv run poe reset-db` | Drop & recreate the DB **and** purge every RabbitMQ queue (so no stale match jobs linger from the previous DB) |
+| `uv run poe seed-examples` | Register every bot under `example_bots/` (wipes existing bots/matches/moves first; no matches created — the runner picks them up) |
 | `uv run poe test` | Run the test suite with coverage |
 | `uv run poe lint` | Check code with ruff |
 | `uv run poe lint-md` | Lint Markdown files with pymarkdown |

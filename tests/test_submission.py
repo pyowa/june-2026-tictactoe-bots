@@ -177,34 +177,95 @@ def test_extract_python_version_no_python_field_returns_default() -> None:
 
 
 # ---------------------------------------------------------------------------
-# On-disk file persistence
+# Bot source persistence (stored in the DB; no filesystem involvement)
 # ---------------------------------------------------------------------------
 
 
-def test_upload_writes_py_file_to_bots_dir(client, bots_dir):
-    upload(client, "MyBot", extra="x = 42\n")
-    saved = bots_dir / "MyBot.py"
-    assert saved.exists()
-    assert "name: MyBot" in saved.read_text()
-    assert "x = 42" in saved.read_text()
+def test_upload_stores_source_bytes_in_db(client, engine):
+    from sqlalchemy import text
+    upload(client, "MyBot", extra="x = 42  # source marker\n")
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT source FROM bots WHERE versioned_name = 'MyBot'")
+        ).first()
+    assert row is not None
+    stored = bytes(row[0])
+    assert b"name: MyBot" in stored
+    assert b"x = 42  # source marker" in stored
 
 
-def test_upload_writes_py_file_to_bots_dir_stripping_extra_chars(client, bots_dir):
-    bot_name = "!234 My Be$t Bot 4EVAI$%U#(($*@*#&$^%"
-    upload(client, bot_name, extra="x = 42\n")
-    saved = bots_dir / "mybot.py"
-    assert saved.exists()
-    assert f"name: {bot_name}" in saved.read_text()
-    assert "x = 42" in saved.read_text()
-
-
-def test_resubmit_writes_versioned_file_and_keeps_v1(client, bots_dir):
+def test_resubmit_stores_each_version_separately_in_db(client, engine):
+    from sqlalchemy import text
     upload(client, "MyBot", extra="# v1 marker\n")
     upload(client, "MyBot", extra="# v2 marker\n")
-    v1 = bots_dir / "MyBot.py"
-    v2 = bots_dir / "MyBotV2.py"
-    assert v1.exists() and v2.exists()
-    assert "# v1 marker" in v1.read_text()
-    assert "# v2 marker" in v2.read_text()
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT versioned_name, source FROM bots "
+                "WHERE base_name = 'MyBot' ORDER BY version"
+            )
+        ).fetchall()
+    assert len(rows) == 2
+    assert rows[0].versioned_name == "MyBot"
+    assert rows[1].versioned_name == "MyBotV2"
+    assert b"# v1 marker" in bytes(rows[0].source)
+    assert b"# v2 marker" in bytes(rows[1].source)
+
+
+# ---------------------------------------------------------------------------
+# Match queue enqueue behavior
+# ---------------------------------------------------------------------------
+
+
+def test_first_upload_enqueues_only_self_pair(client, mock_queue):
+    upload(client, "Solo")
+    assert len(mock_queue.messages) == 1
+    job = mock_queue.messages[0]
+    assert job.bot_x_id == job.bot_o_id  # self-pair
+    assert job.python_version == "3"
+
+
+def test_second_upload_enqueues_three_jobs(client, mock_queue):
+    """With two bots in the DB, a new upload should produce:
+       self-pair + (new vs existing) + (existing vs new) = 3 messages."""
+    upload(client, "Alpha")
+    mock_queue.messages.clear()  # ignore Alpha's own self-pair
+    upload(client, "Beta")
+    pairs = {(m.bot_x_id, m.bot_o_id) for m in mock_queue.messages}
+    assert len(pairs) == 3
+    # Beta's id is 2, Alpha is 1.
+    assert (2, 2) in pairs  # self
+    assert (2, 1) in pairs  # Beta as X
+    assert (1, 2) in pairs  # Beta as O
+
+
+def test_enqueue_picks_higher_python_version(client, mock_queue):
+    """When two bots declare different python versions, the higher one wins."""
+    client.post(
+        "/submit",
+        files={
+            "file": (
+                "alpha.py",
+                b'"""\nname: Alpha\npython: 3.11\n"""\nimport sys\n',
+                "text/plain",
+            )
+        },
+    )
+    mock_queue.messages.clear()
+    client.post(
+        "/submit",
+        files={
+            "file": (
+                "beta.py",
+                b'"""\nname: Beta\npython: 3.13\n"""\nimport sys\n',
+                "text/plain",
+            )
+        },
+    )
+    # Every cross-pair message should be tagged with the higher version.
+    cross = [m for m in mock_queue.messages if m.bot_x_id != m.bot_o_id]
+    assert cross, "expected at least one cross-pair message"
+    for m in cross:
+        assert m.python_version == "3.13"
 
 

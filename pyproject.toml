@@ -7,10 +7,12 @@ dependencies = [
     "uvicorn[standard]",
     "jinja2",
     "python-multipart",
-    "aiosqlite",
     "sqlalchemy>=2.0",
     "alembic>=1.13",
     "greenlet",
+    "asyncpg",
+    "psycopg2-binary",
+    "aio-pika",
 ]
 
 [tool.uv]
@@ -19,6 +21,7 @@ package = false
 [dependency-groups]
 dev = [
     "pytest",
+    "pytest-asyncio",
     "pytest-cov",
     "httpx2",
     "ruff",
@@ -28,23 +31,26 @@ dev = [
 ]
 
 [tool.poe.tasks]
-dev      = "uvicorn web.main:app --reload"
-test     = "pytest"
-lint     = "ruff check ."
-lint-md  = "pymarkdown scan README.md TODO.md"
-format   = "ruff format ."
-typecheck = "ty check web/ db/ runner/"
-runner   = "python runner/match_runner.py"
-seed     = "python scripts/seed.py"
+dev          = "uvicorn web.main:app --reload"
+test         = "pytest"
+lint         = "ruff check ."
+lint-md      = "pymarkdown scan README.md TODO.md"
+format       = "ruff format ."
+typecheck    = "ty check web/ db/ runner/ messaging/"
+orchestrator = "python runner/orchestrator.py"
+worker       = "python runner/turn_worker.py"
 seed-examples = "python scripts/seed_example_bots.py"
-migrate  = "alembic upgrade head"
-reset-db = "python scripts/reset_db.py"
+migrate      = "alembic upgrade head"
+reset-db     = "python scripts/reset_db.py"
+db-up        = "docker compose up -d"
+db-down      = "docker compose down"
 
 [tool.poe.tasks.start]
 shell = """
 trap 'kill 0' EXIT
 uvicorn web.main:app --reload &
-python runner/match_runner.py &
+WORKER_PYTHON_VERSION=3 python runner/turn_worker.py &
+python runner/orchestrator.py &
 wait
 """
 
@@ -64,7 +70,8 @@ ignore = ["ANN401"]
 "scripts/*" = ["ANN"]
 
 [tool.pytest.ini_options]
-addopts = "--cov=web --cov=db --cov=runner --cov-report=term-missing"
+addopts = "--cov=web --cov=db --cov=runner --cov=messaging --cov-report=term-missing"
+asyncio_mode = "auto"
 
 [tool.coverage.run]
 omit = ["bots/*", "scripts/*", "tests/*", "example_bots/*"]
@@ -73,7 +80,10 @@ omit = ["bots/*", "scripts/*", "tests/*", "example_bots/*"]
 core = "sysmon"
 
 [tool.coverage.report]
+# Setting exclude_lines REPLACES the defaults, so include `pragma: no cover`
+# explicitly along with our extras.
 exclude_lines = [
+    "pragma: no cover",
     "if __name__ == .__main__.:",
     "if TYPE_CHECKING:",
 ]

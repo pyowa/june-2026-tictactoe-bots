@@ -29,7 +29,7 @@ def upgrade() -> None:
     sa.Column('owner_token', sa.String(), nullable=False),
     sa.Column('file_path', sa.String(), nullable=False),
     sa.Column('python_version', sa.String(), server_default='3', nullable=False),
-    sa.Column('submitted_at', sa.DateTime(), server_default=sa.text("(datetime('now'))"), nullable=False),
+    sa.Column('submitted_at', sa.DateTime(), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('versioned_name')
     )
@@ -39,7 +39,7 @@ def upgrade() -> None:
     sa.Column('bot_o_id', sa.Integer(), nullable=False),
     sa.Column('winner_id', sa.Integer(), nullable=True),
     sa.Column('result', sa.String(), nullable=False),
-    sa.Column('played_at', sa.DateTime(), server_default=sa.text("(datetime('now'))"), nullable=False),
+    sa.Column('played_at', sa.DateTime(), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
     sa.CheckConstraint("result IN ('x_wins', 'o_wins', 'cat', 'x_forfeit', 'o_forfeit')", name='ck_matches_result'),
     sa.ForeignKeyConstraint(['bot_o_id'], ['bots.id'], ),
     sa.ForeignKeyConstraint(['bot_x_id'], ['bots.id'], ),

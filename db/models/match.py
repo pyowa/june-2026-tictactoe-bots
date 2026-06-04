@@ -25,7 +25,7 @@ class Match(Base):
     winner_id: Mapped[int | None] = mapped_column(ForeignKey("bots.id"))
     result: Mapped[str]
     played_at: Mapped[datetime] = mapped_column(
-        server_default=func.datetime("now"),
+        server_default=func.current_timestamp(),
     )
 
     moves: Mapped[list["Move"]] = relationship(

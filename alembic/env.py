@@ -1,5 +1,4 @@
 import asyncio
-import os
 import sys
 from logging.config import fileConfig
 from pathlib import Path
@@ -11,13 +10,11 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+from db.database import DATABASE_URL
 from db.models import Base
 
 config = context.config
-
-# Allow overriding the DB URL via env var (TTT_DB_PATH).
-db_path = os.environ.get("TTT_DB_PATH", "ttt.db")
-config.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///{db_path}")
+config.set_main_option("sqlalchemy.url", DATABASE_URL)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
@@ -29,7 +26,6 @@ def do_run_migrations(connection: Connection) -> None:
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
-        render_as_batch=True,  # SQLite requires batch mode for most ALTERs
     )
 
     with context.begin_transaction():
@@ -56,7 +52,6 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
-        render_as_batch=True,
     )
     with context.begin_transaction():
         context.run_migrations()
