@@ -112,38 +112,44 @@ This launches the web server, the match orchestrator, and a py3 turn-worker — 
 
 ### Local architecture
 
+**What runs where** — `poe start` launches three host processes (web, orchestrator, py3 worker); `docker compose up -d` runs Postgres and RabbitMQ. The browser talks to the web; everything else talks via Postgres + RabbitMQ.
+
+**How a bot upload becomes recorded matches** — sequence diagram below.
+
 ```mermaid
-%%{init: {'flowchart': {'curve': 'stepAfter', 'nodeSpacing': 60, 'rankSpacing': 70}}}%%
-flowchart TD
-    Browser([Browser])
+sequenceDiagram
+    autonumber
+    actor Browser
+    participant Web
+    participant DB as Postgres
+    participant RMQ as RabbitMQ
+    participant Orch as Orchestrator
+    participant Worker as Turn worker (py3)
 
-    subgraph host["Host processes (poe start)"]
-        direction LR
-        Web["Web<br/>(web/main.py)"]
-        Orch["Orchestrator<br/>(runner/orchestrator.py)"]
-        Worker["Turn worker py3<br/>(runner/turn_worker.py)"]
+    Note over Browser,Worker: Upload — Web hands off via the queue
+    Browser->>Web: POST /submit (.py)
+    Web->>DB: INSERT bot row + source bytes
+    Web->>RMQ: publish MatchJob<br/>per unplayed pair<br/>(matches.todo)
+
+    Note over Browser,Worker: Match — Orchestrator drives the game loop via RPC
+    RMQ->>Orch: deliver MatchJob
+    Orch->>DB: SELECT source for X & O
+
+    loop For each turn (up to 9)
+        Orch->>RMQ: publish turn request<br/>(turn.py3.requests)
+        RMQ->>Worker: deliver
+        Worker->>Worker: write tmpfile<br/>+ run `python bot.py`<br/>(stdin = board, timeout)
+        Worker->>RMQ: publish reply<br/>(to orchestrator's reply queue)
+        RMQ->>Orch: deliver reply
+        Orch->>Orch: validate move,<br/>check winner / draw
     end
 
-    subgraph compose["docker compose"]
-        direction LR
-        DB[("Postgres<br/>bots · matches · moves<br/>(source bytes on bots row)")]
-        RMQ{{"RabbitMQ<br/>matches.todo<br/>turn.py3.requests<br/>+ reply queue"}}
-    end
+    Orch->>DB: INSERT match + moves
 
-    Browser -- "upload" --> Web
-    Browser -- "poll UI" --> Web
-
-    Web -- "insert bot + source" --> DB
-    Web -- "publish MatchJob" --> RMQ
-    Web -- "read" --> DB
-
-    RMQ -- "matches.todo" --> Orch
-    Orch -- "fetch source" --> DB
-    Orch -- "turn request" --> RMQ
-    RMQ -- "turn.py3.requests" --> Worker
-    Worker -- "reply" --> RMQ
-    RMQ -- "reply queue" --> Orch
-    Orch -- "record match" --> DB
+    Note over Browser,Worker: Live leaderboard — polled every 2s
+    Browser->>Web: GET /leaderboard
+    Web->>DB: aggregate query
+    Web-->>Browser: HTML
 ```
 
 The web app and the runner processes all run natively on the host today; only Postgres and RabbitMQ live in containers. The orchestrator is Python-version-agnostic; each turn worker is bound to one Python version (currently just `py3`). Adding more versions = adding more workers consuming their own `turn.pyX.Y.requests` queue.
