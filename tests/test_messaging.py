@@ -58,6 +58,40 @@ def test_create_sync_engine_uses_database_url() -> None:
         engine.dispose()
 
 
+async def test_session_keeps_objects_valid_after_commit(engine) -> None:
+    """Pin the `expire_on_commit=False` contract: ORM objects loaded in an
+    async session must remain readable after `await session.commit()` without
+    an explicit refresh.
+
+    Why this matters: with the SQLAlchemy default (`expire_on_commit=True`),
+    attribute access after commit triggers an automatic refresh — which in
+    async mode raises `MissingGreenlet` unless the caller awaits a
+    `session.refresh(obj)` first. The flag protects future code authors from
+    writing post-commit attribute reads that look fine locally but break
+    under load. Without this test, flipping the flag back to `True` is
+    silently undetected (no current code path exercises post-commit reads)."""
+    import db.database
+    from db.models.bot import Bot
+    from tests.conftest import TEST_ASYNC_URL
+
+    db.database.reconfigure(TEST_ASYNC_URL)
+
+    async with db.database.get_session() as session:
+        bot = Bot(
+            base_name="ExpireProbe",
+            versioned_name="ExpireProbeV1",
+            version=1,
+            owner_token="t",
+            python_version="3",
+            source=b"",
+        )
+        session.add(bot)
+        await session.commit()
+        # Post-commit attribute access. With expire_on_commit=True this
+        # would trigger an implicit refresh and raise.
+        assert bot.base_name == "ExpireProbe"
+
+
 # ---------------------------------------------------------------------------
 # RpcClient — correlation_id round-trip without a broker
 # ---------------------------------------------------------------------------
