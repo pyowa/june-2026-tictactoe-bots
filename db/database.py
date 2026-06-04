@@ -239,15 +239,6 @@ async def get_bot_family(
     return list(result.all())
 
 
-async def list_bot_names(session: AsyncSession) -> list[str]:
-    """Distinct base_names — used for the matches filter dropdown so picking
-    a name selects the whole bot family, not a single version."""
-    result = await session.execute(
-        select(Bot.base_name).distinct().order_by(Bot.base_name)
-    )
-    return list(result.scalars().all())
-
-
 def _match_select() -> Any:
     bx = Bot.__table__.alias("bx")
     bo = Bot.__table__.alias("bo")
@@ -256,8 +247,10 @@ def _match_select() -> Any:
         select(
             Match.id,
             bx.c.versioned_name.label("bot_x"),
+            bx.c.base_name.label("bot_x_base"),
             bx.c.python_version.label("bot_x_python"),
             bo.c.versioned_name.label("bot_o"),
+            bo.c.base_name.label("bot_o_base"),
             bo.c.python_version.label("bot_o_python"),
             bw.c.versioned_name.label("winner"),
             Match.result,

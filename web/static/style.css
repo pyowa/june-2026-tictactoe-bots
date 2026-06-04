@@ -184,27 +184,6 @@ a:hover { color: var(--ink); }
 .stat-wins    { color: #1a7a1a; font-weight: 600; }
 .stat-forfeit { color: #b30000; font-weight: 600; }
 
-.filter-form {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    margin-bottom: 1.25rem;
-    font-size: 0.95rem;
-}
-
-.filter-form label { color: var(--ink); margin-bottom: 0; }
-
-.filter-form select {
-    background: var(--paper);
-    border: var(--border);
-    border-radius: 6px;
-    color: var(--ink);
-    padding: 0.3rem 0.6rem;
-    font-family: inherit;
-    font-size: 0.95rem;
-    cursor: pointer;
-}
-
 /* Match detail */
 .match-meta {
     display: flex;

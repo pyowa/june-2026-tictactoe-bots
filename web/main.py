@@ -2,7 +2,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Cookie, Depends, FastAPI, File, Query, Request, UploadFile
+from fastapi import Cookie, Depends, FastAPI, File, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -12,7 +12,6 @@ from db.database import (
     get_match,
     get_moves,
     get_session,
-    list_bot_names,
     list_bots,
     list_matches,
 )
@@ -70,17 +69,10 @@ async def leaderboard(request: Request) -> HTMLResponse:
 
 
 @app.get("/matches", response_class=HTMLResponse)
-async def matches(
-    request: Request, bot: str | None = Query(default=None)
-) -> HTMLResponse:
+async def matches(request: Request) -> HTMLResponse:
     async with get_session() as session:
-        rows = await list_matches(session, bot_name=bot)
-        bot_names = await list_bot_names(session)
-    return templates.TemplateResponse(
-        request,
-        "matches.html",
-        {"matches": rows, "bot_names": bot_names, "selected_bot": bot},
-    )
+        rows = await list_matches(session)
+    return templates.TemplateResponse(request, "matches.html", {"matches": rows})
 
 
 @app.get("/bots/{base_name}", response_class=HTMLResponse)

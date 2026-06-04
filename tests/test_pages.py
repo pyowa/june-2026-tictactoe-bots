@@ -186,38 +186,7 @@ def test_matches_contains_link_to_detail(client, engine):
     assert f"/matches/{match_id}" in resp.text
 
 
-# ---------------------------------------------------------------------------
-# Matches list — bot filter
-# ---------------------------------------------------------------------------
-
-
-def test_matches_filter_shows_only_matching_bot(client, engine):
-    a = db_insert_bot(engine, "AlphaBot")
-    b = db_insert_bot(engine, "BetaBot")
-    c = db_insert_bot(engine, "GammaBot")
-    db_insert_match(engine, a, b, winner_id=a, result="x_wins")
-    db_insert_match(engine, b, c, winner_id=b, result="x_wins")
-
-    resp = client.get("/matches?bot=AlphaBot")
-    # GammaBot appears only in the dropdown, not in a table cell
-    assert "<td>AlphaBot " in resp.text
-    assert "<td>BetaBot " in resp.text   # shared match with AlphaBot
-    assert "<td>GammaBot " not in resp.text
-
-
-def test_matches_filter_includes_bot_as_o(client, engine):
-    a = db_insert_bot(engine, "AlphaBot")
-    b = db_insert_bot(engine, "BetaBot")
-    c = db_insert_bot(engine, "GammaBot")
-    db_insert_match(engine, c, a, winner_id=c, result="x_wins")  # AlphaBot is O
-    db_insert_match(engine, b, c, winner_id=b, result="x_wins")  # AlphaBot uninvolved
-
-    resp = client.get("/matches?bot=AlphaBot")
-    assert "<td>GammaBot " in resp.text
-    assert "<td>BetaBot " not in resp.text
-
-
-def test_matches_no_filter_shows_all(client, engine):
+def test_matches_lists_all_matches(client, engine):
     a = db_insert_bot(engine, "AlphaBot")
     b = db_insert_bot(engine, "BetaBot")
     c = db_insert_bot(engine, "GammaBot")
@@ -225,53 +194,38 @@ def test_matches_no_filter_shows_all(client, engine):
     db_insert_match(engine, b, c, winner_id=b, result="x_wins")
 
     resp = client.get("/matches")
-    assert "<td>AlphaBot " in resp.text
-    assert "<td>BetaBot " in resp.text
-    assert "<td>GammaBot " in resp.text
-
-
-def test_matches_filter_unknown_bot_shows_empty(client, engine):
-    a = db_insert_bot(engine, "AlphaBot")
-    b = db_insert_bot(engine, "BetaBot")
-    db_insert_match(engine, a, b, winner_id=a, result="x_wins")
-
-    resp = client.get("/matches?bot=NoSuchBot")
-    assert "No matches played yet" in resp.text
-
-
-def test_matches_filter_shows_selected_bot_in_heading(client, engine):
-    a = db_insert_bot(engine, "AlphaBot")
-    b = db_insert_bot(engine, "BetaBot")
-    db_insert_match(engine, a, b, winner_id=a, result="x_wins")
-
-    resp = client.get("/matches?bot=AlphaBot")
     assert "AlphaBot" in resp.text
-    # heading should indicate filtered view
-    assert "Matches" in resp.text
+    assert "BetaBot" in resp.text
+    assert "GammaBot" in resp.text
 
 
-def test_matches_dropdown_contains_all_bots(client, engine):
-    db_insert_bot(engine, "AlphaBot")
-    db_insert_bot(engine, "BetaBot")
+def test_matches_bot_names_link_to_bot_detail(client, engine):
+    a = db_insert_bot(engine, "AlphaBot")
+    b = db_insert_bot(engine, "BetaBot")
+    db_insert_match(engine, a, b, winner_id=a, result="x_wins")
 
     resp = client.get("/matches")
-    assert 'value="AlphaBot"' in resp.text
-    assert 'value="BetaBot"' in resp.text
+    assert '<a href="/bots/AlphaBot">AlphaBot</a>' in resp.text
+    assert '<a href="/bots/BetaBot">BetaBot</a>' in resp.text
 
 
-def test_matches_dropdown_preselects_filtered_bot(client, engine):
-    db_insert_bot(engine, "AlphaBot")
-    db_insert_bot(engine, "BetaBot")
+def test_match_detail_bot_names_link_to_bot_detail(client, engine):
+    a = db_insert_bot(engine, "AlphaBot")
+    b = db_insert_bot(engine, "BetaBot")
+    match_id = db_insert_match(engine, a, b, winner_id=a, result="x_wins")
 
-    resp = client.get("/matches?bot=AlphaBot")
-    # The AlphaBot option should carry the selected attribute; BetaBot should not
-    text = resp.text
-    alpha_option_pos = text.index('value="AlphaBot"')
-    beta_option_pos = text.index('value="BetaBot"')
-    alpha_section = text[alpha_option_pos : alpha_option_pos + 60]
-    beta_section = text[beta_option_pos : beta_option_pos + 60]
-    assert "selected" in alpha_section
-    assert "selected" not in beta_section
+    resp = client.get(f"/matches/{match_id}")
+    assert '<a href="/bots/AlphaBot">AlphaBot</a>' in resp.text
+    assert '<a href="/bots/BetaBot">BetaBot</a>' in resp.text
+
+
+def test_bot_detail_opponent_names_link_to_bot_detail(client, engine):
+    a = db_insert_bot(engine, "AlphaBot")
+    b = db_insert_bot(engine, "BetaBot")
+    db_insert_match(engine, a, b, winner_id=a, result="x_wins")
+
+    resp = client.get("/bots/AlphaBot")
+    assert '<a href="/bots/BetaBot">BetaBot</a>' in resp.text
 
 
 def test_leaderboard_bot_name_links_to_bot_detail(client, engine):
@@ -582,14 +536,3 @@ def test_bot_family_intra_family_match_appears_under_both_versions(client, engin
     assert body.count("MyBotV2 won") == 2
 
 
-def test_matches_filter_by_base_name_includes_all_versions(client, engine):
-    v1 = _insert_versioned(engine, "MyBot", 1, "2024-01-01 10:00:00")
-    v2 = _insert_versioned(engine, "MyBot", 2, "2024-01-02 10:00:00")
-    other = db_insert_bot(engine, "OtherBot")
-    db_insert_match(engine, v1, other, winner_id=v1, result="x_wins")
-    db_insert_match(engine, v2, other, winner_id=v2, result="x_wins")
-
-    resp = client.get("/matches?bot=MyBot")
-    # Both versions' matches show up in the flat list.
-    assert "MyBot won" in resp.text  # V1 row
-    assert "MyBotV2 won" in resp.text  # V2 row

@@ -2,29 +2,7 @@
 {% block content %}
 
 <section class="card">
-    <h2>
-        {% if selected_bot %}
-            Matches &mdash; {{ selected_bot }}
-        {% else %}
-            Recent Matches
-        {% endif %}
-    </h2>
-
-    <form class="filter-form" method="get" action="/matches">
-        <label for="bot-filter">Filter by bot</label>
-        <select id="bot-filter" name="bot" onchange="this.form.submit()">
-            <option value="">All bots</option>
-            {% for name in bot_names %}
-            <option value="{{ name }}"
-                {% if name == selected_bot %}selected{% endif %}>
-                {{ name }}
-            </option>
-            {% endfor %}
-        </select>
-        {% if selected_bot %}
-        <a href="/matches">Clear filter</a>
-        {% endif %}
-    </form>
+    <h2>Recent Matches</h2>
 
     <div id="live-region">
     {% if matches %}
@@ -48,8 +26,8 @@
                 'o_forfeit': m.bot_o ~ ' forfeited'
             }[m.result] %}
             <tr>
-                <td>{{ m.bot_x }} <span class="muted">(py{{ m.bot_x_python }})</span></td>
-                <td>{{ m.bot_o }} <span class="muted">(py{{ m.bot_o_python }})</span></td>
+                <td><a href="/bots/{{ m.bot_x_base }}">{{ m.bot_x }}</a> <span class="muted">(py{{ m.bot_x_python }})</span></td>
+                <td><a href="/bots/{{ m.bot_o_base }}">{{ m.bot_o }}</a> <span class="muted">(py{{ m.bot_o_python }})</span></td>
                 <td class="{% if m.result == 'cat' %}muted{% elif 'forfeit' in m.result %}stat-forfeit{% else %}stat-wins{% endif %}">
                     {{ result_label }}
                 </td>
