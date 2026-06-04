@@ -113,33 +113,37 @@ This launches the web server, the match orchestrator, and a py3 turn-worker — 
 ### Local architecture
 
 ```mermaid
-flowchart LR
+%%{init: {'flowchart': {'curve': 'stepAfter', 'nodeSpacing': 60, 'rankSpacing': 70}}}%%
+flowchart TD
     Browser([Browser])
 
     subgraph host["Host processes (poe start)"]
-        Web["Web<br/>FastAPI<br/>(web/main.py)"]
+        direction LR
+        Web["Web<br/>(web/main.py)"]
         Orch["Orchestrator<br/>(runner/orchestrator.py)"]
         Worker["Turn worker py3<br/>(runner/turn_worker.py)"]
     end
 
     subgraph compose["docker compose"]
-        DB[("Postgres<br/>bots · matches · moves<br/>(bot source bytes live on the bots row — single source of truth)")]
-        RMQ{{"RabbitMQ<br/>matches.todo · turn.py3.requests<br/>+ orchestrator reply queue"}}
+        direction LR
+        DB[("Postgres<br/>bots · matches · moves<br/>(source bytes on bots row)")]
+        RMQ{{"RabbitMQ<br/>matches.todo<br/>turn.py3.requests<br/>+ reply queue"}}
     end
 
-    Browser -- "upload .py" --> Web
-    Browser -- "poll leaderboard / matches" --> Web
-    Web -- "insert bot row + source bytes" --> DB
-    Web -- "publish MatchJob per unplayed pair" --> RMQ
-    Web -- "read leaderboard / matches" --> DB
+    Browser -- "upload" --> Web
+    Browser -- "poll UI" --> Web
 
-    RMQ -- "deliver matches.todo" --> Orch
-    Orch -- "fetch X &amp; O source by id" --> DB
-    Orch -- "publish turn request<br/>(turn.py3.requests)" --> RMQ
-    RMQ -- "deliver turn request" --> Worker
-    Worker -- "publish reply<br/>(orchestrator's reply queue)" --> RMQ
-    RMQ -- "deliver reply" --> Orch
-    Orch -- "record match + moves" --> DB
+    Web -- "insert bot + source" --> DB
+    Web -- "publish MatchJob" --> RMQ
+    Web -- "read" --> DB
+
+    RMQ -- "matches.todo" --> Orch
+    Orch -- "fetch source" --> DB
+    Orch -- "turn request" --> RMQ
+    RMQ -- "turn.py3.requests" --> Worker
+    Worker -- "reply" --> RMQ
+    RMQ -- "reply queue" --> Orch
+    Orch -- "record match" --> DB
 ```
 
 The web app and the runner processes all run natively on the host today; only Postgres and RabbitMQ live in containers. The orchestrator is Python-version-agnostic; each turn worker is bound to one Python version (currently just `py3`). Adding more versions = adding more workers consuming their own `turn.pyX.Y.requests` queue.
