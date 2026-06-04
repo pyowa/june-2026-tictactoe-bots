@@ -96,8 +96,8 @@ def test_main_inserts_bots_and_enqueues_match_jobs(
     assert by_name["Alpha"][3] == "3.11"
     assert by_name["Beta"][1] == "Beta"
     assert by_name["Beta"][2] == 1
-    # Default python version when no `python:` field — matches web.main's default.
-    from web.main import DEFAULT_PYTHON_VERSION
+    # Default python version when no `python:` field — matches web.utils' default.
+    from web.utils import DEFAULT_PYTHON_VERSION
     assert by_name["Beta"][3] == DEFAULT_PYTHON_VERSION
 
     # 2 bots -> 2*2 = 4 MatchJobs enqueued.

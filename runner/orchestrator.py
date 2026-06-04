@@ -11,14 +11,11 @@ import base64
 import json
 import os
 import signal
-import sys
-from pathlib import Path
 from typing import Any, Protocol
 
 import aio_pika
 from sqlalchemy import select
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
 from db.database import get_session, record_match
 from db.models import Bot
 from messaging import BROKER_URL

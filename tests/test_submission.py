@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 import web.main
 from tests.conftest import upload
-from web.main import extract_python_version
+from web.utils import extract_python_version
 
 
 def read_owned_cookie(client: TestClient) -> dict:
@@ -131,7 +131,7 @@ def test_python_version_defaults_when_omitted(client, engine):
     """Omitted `python:` field → defaults to the latest supported version."""
     from sqlalchemy import text
 
-    from web.main import DEFAULT_PYTHON_VERSION
+    from web.utils import DEFAULT_PYTHON_VERSION
     resp = upload(client, "MyBot")
     assert "submitted successfully" in resp.text
     with engine.connect() as conn:
@@ -201,7 +201,7 @@ def test_extract_python_version_first_node_not_expr() -> None:
 
 
 def test_extract_python_version_no_python_field_returns_default() -> None:
-    from web.main import DEFAULT_PYTHON_VERSION
+    from web.utils import DEFAULT_PYTHON_VERSION
     source = '"""\nname: MyBot\n"""\nimport sys\n'
     assert extract_python_version(source) == DEFAULT_PYTHON_VERSION
 
@@ -248,7 +248,7 @@ def test_resubmit_stores_each_version_separately_in_db(client, engine):
 
 
 def test_first_upload_enqueues_only_self_pair(client, mock_queue):
-    from web.main import DEFAULT_PYTHON_VERSION
+    from web.utils import DEFAULT_PYTHON_VERSION
     upload(client, "Solo")
     assert len(mock_queue.messages) == 1
     job = mock_queue.messages[0]

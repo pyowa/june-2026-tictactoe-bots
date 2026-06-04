@@ -4,19 +4,16 @@ Drop and recreate the database, AND purge all RabbitMQ queues, so the next
 run starts from a clean slate (no stale match jobs from old DB IDs lingering
 on the broker).
 
-Run with: uv run python scripts/reset_db.py
+Run with: uv run poe reset-db  (or `python -m scripts.reset_db`)
 """
 
 import base64
 import json
 import subprocess
-import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
 from sqlalchemy import text
 
 from db.database import DATABASE_URL, create_sync_engine

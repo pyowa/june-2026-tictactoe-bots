@@ -47,10 +47,10 @@ CMD ["uvicorn", "web.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload
 # orchestrator: consumes matches.todo, drives the per-turn RPC loop.
 # ---------------------------------------------------------------------------
 FROM base AS orchestrator
-CMD ["python", "runner/orchestrator.py"]
+CMD ["python", "-m", "runner.orchestrator"]
 
 # ---------------------------------------------------------------------------
 # worker: consumes turn.pyX.Y.requests, runs the bot subprocess.
 # ---------------------------------------------------------------------------
 FROM base AS worker
-CMD ["python", "runner/turn_worker.py"]
+CMD ["python", "-m", "runner.turn_worker"]

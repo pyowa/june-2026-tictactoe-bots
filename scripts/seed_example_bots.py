@@ -4,20 +4,18 @@ Register every bot under example_bots/ as a v1 bot in the database (source
 bytes stored on the row), then enqueue every bot pair to `matches.todo` so
 the orchestrator has work to do. Clears existing bots/matches/moves first.
 
-Run with: uv run python scripts/seed_example_bots.py
+Run with: uv run poe seed-examples  (or `python -m scripts.seed_example_bots`)
 """
 
 import asyncio
 import secrets
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
 from sqlalchemy import Engine, text
 
 from db.database import create_sync_engine
 from messaging import MatchJob, get_queue, pick_python_version
-from web.main import extract_bot_name, extract_python_version, versioned_name
+from web.utils import extract_bot_name, extract_python_version, versioned_name
 
 ROOT = Path(__file__).parent.parent
 EXAMPLE_BOTS_DIR = ROOT / "example_bots"

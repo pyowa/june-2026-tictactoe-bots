@@ -11,13 +11,10 @@ import base64
 import json
 import os
 import subprocess
-import sys
 import tempfile
-from pathlib import Path
 
 import aio_pika
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
 from messaging import BROKER_URL
 from messaging.routing import turn_queue_for
 from messaging.rpc import serve_rpc
