@@ -104,7 +104,7 @@ Defaults: Postgres at `postgresql+asyncpg://ttt:ttt@localhost:5432/ttt`, RabbitM
 uv run poe start
 ```
 
-This launches the web server and the match runner together. Open `http://localhost:8000`. Ctrl+C stops both. `uv run poe db-down` stops Postgres + RabbitMQ. RabbitMQ's management UI is at `http://localhost:15672` (`guest`/`guest`).
+This launches the web server, the match orchestrator, and a py3 turn-worker — all in the foreground. Open `http://localhost:8000`. Ctrl+C stops them. `uv run poe db-down` stops Postgres + RabbitMQ. RabbitMQ's management UI is at `http://localhost:15672` (`guest`/`guest`).
 
 ---
 
@@ -133,10 +133,12 @@ flowchart LR
     Web -- "publish MatchJob per unplayed pair" --> RMQ
     Web -- "read leaderboard / matches" --> DB
 
-    RMQ -- "consume matches.todo" --> Orch
-    Orch -- "fetch X & O source by id" --> DB
-    Orch -- "RPC: play this turn (symbol, board, source)" --> Worker
-    Worker -- "reply: new board or error" --> Orch
+    RMQ -- "deliver matches.todo" --> Orch
+    Orch -- "fetch X &amp; O source by id" --> DB
+    Orch -- "publish turn request<br/>(turn.py3.requests)" --> RMQ
+    RMQ -- "deliver turn request" --> Worker
+    Worker -- "publish reply<br/>(orchestrator's reply queue)" --> RMQ
+    RMQ -- "deliver reply" --> Orch
     Orch -- "record match + moves" --> DB
 ```
 
@@ -155,7 +157,7 @@ tic-tac-toe-event/
 └── tests/          # Test suite
 ```
 
-Stack: FastAPI · SQLAlchemy 2.x (async) on Postgres · RabbitMQ (`aio-pika`) for match queueing · Alembic · Docker for sandboxing. Tests use a recording in-memory queue and an isolated `ttt_test` database on the running Postgres.
+Stack: FastAPI · SQLAlchemy 2.x (async, `asyncpg`) on Postgres · RabbitMQ (`aio-pika`) for match queueing + per-turn RPC · Alembic for migrations · Docker Compose for Postgres + RabbitMQ. Tests use a recording in-memory queue and an isolated `ttt_test` database on the running Postgres.
 
 ### Common tasks
 
@@ -169,7 +171,7 @@ Stack: FastAPI · SQLAlchemy 2.x (async) on Postgres · RabbitMQ (`aio-pika`) fo
 | `uv run poe db-down` | Stop the compose services |
 | `uv run poe migrate` | Apply pending Alembic migrations |
 | `uv run poe reset-db` | Drop & recreate the DB **and** purge every RabbitMQ queue (so no stale match jobs linger from the previous DB) |
-| `uv run poe seed-examples` | Register every bot under `example_bots/` (wipes existing bots/matches/moves first; no matches created — the runner picks them up) |
+| `uv run poe seed-examples` | Wipe bots/matches/moves, insert every file under `example_bots/` as a bot (multiple files sharing a `name:` auto-version), then enqueue every bot pair on `matches.todo` |
 | `uv run poe test` | Run the test suite with coverage |
 | `uv run poe lint` | Check code with ruff |
 | `uv run poe lint-md` | Lint Markdown files with pymarkdown |
@@ -187,19 +189,21 @@ uv run alembic revision --autogenerate -m "describe the change"
 uv run poe migrate
 ```
 
-A database that pre-dates Alembic (no `alembic_version` table) needs a one-time `uv run alembic stamp head` before further migrations.
-
 ### How matches run
 
-The runner schedules every ordered pair `(X, O)` of submitted bots — including each bot's self-pair, which catches strategies that misbehave when mirrored. For each match:
+A match starts as a message on `matches.todo`. The web app publishes one per ordered pair `(X, O)` — including each bot's self-pair, which catches strategies that misbehave when mirrored — whenever a bot is uploaded. `seed-examples` publishes the full N×N set at once.
 
-1. Send the current board to the active bot via stdin
-2. Read its stdout (subject to the per-move timeout)
-3. Validate: parseable 3×3 board, one new piece, correct symbol, nothing overwritten
-4. Check for a win (three in a row/column/diagonal) or a cat game
-5. Swap symbols and repeat until the game ends
+The **orchestrator** consumes those messages and drives the game loop:
 
-Any validation failure, exception, or timeout is an immediate forfeit. Both moves and outcomes are persisted so matches can be replayed from the UI.
+1. Fetch both bots' source bytes from Postgres.
+2. For each turn (X then O, alternating), publish an RPC request on `turn.pyX.Y.requests` carrying `{symbol, board, source}` and a correlation id; wait for the reply on the orchestrator's exclusive reply queue.
+3. Validate the worker's response: parseable 3×3 board, exactly one new piece, correct symbol, nothing overwritten.
+4. Check for a win (three in a row / column / diagonal) or a cat game.
+5. Swap symbols and repeat until the game ends.
+
+The **turn worker** (one per supported Python version) receives each turn, writes the source to a tmpfile, runs `python <tmpfile>` as a subprocess with the symbol + board piped to stdin (subject to a per-move timeout), and publishes whatever the bot printed back to the orchestrator.
+
+Any validation failure, exception, or timeout is an immediate forfeit for whichever bot was on the move. The orchestrator persists every move + the final outcome so matches can be replayed from the UI.
 
 ---
 
