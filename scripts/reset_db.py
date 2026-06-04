@@ -51,7 +51,7 @@ def purge_rabbitmq_queues() -> None:
         # They'll be auto-deleted when that connection dies — skip them.
         if name.startswith("amq"):
             continue
-        vhost = urllib.parse.quote(q.get("vhost", "/"), safe="")
+        vhost = urllib.parse.quote(q["vhost"], safe="")
         encoded = urllib.parse.quote(name, safe="")
         url = f"{RABBITMQ_MGMT_URL}/api/queues/{vhost}/{encoded}/contents"
         req = urllib.request.Request(

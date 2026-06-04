@@ -31,7 +31,7 @@ class RpcClient:
 
     async def _on_reply(self, message: AbstractIncomingMessage) -> None:
         cid = message.correlation_id
-        if cid is not None and cid in self._pending:
+        if cid in self._pending:
             future = self._pending.pop(cid)
             if not future.done():
                 future.set_result(message.body)
