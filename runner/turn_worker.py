@@ -15,7 +15,7 @@ import tempfile
 
 import aio_pika
 
-from messaging import BROKER_URL
+from messaging.client import BROKER_URL
 from messaging.routing import turn_queue_for
 from messaging.rpc import serve_rpc
 

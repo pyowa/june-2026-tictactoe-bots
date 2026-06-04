@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine, text
 
 import db.database
-import messaging
+import messaging.client
 import web.main
 from db.models.base import Base
 from messaging.queue import MatchJob
@@ -103,9 +103,9 @@ class _RecordingQueue:
 @pytest.fixture()
 def mock_queue() -> Iterator[_RecordingQueue]:
     queue = _RecordingQueue()
-    messaging.set_queue(queue)
+    messaging.client.set_queue(queue)
     yield queue
-    messaging.set_queue(None)
+    messaging.client.set_queue(None)
 
 
 @pytest.fixture()

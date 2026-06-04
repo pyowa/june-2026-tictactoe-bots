@@ -14,7 +14,9 @@ from pathlib import Path
 from sqlalchemy import Engine, text
 
 from db.database import create_sync_engine
-from messaging import MatchJob, get_queue, pick_python_version
+from messaging.client import get_queue
+from messaging.queue import MatchJob
+from messaging.routing import pick_python_version
 from web.utils import extract_bot_name, extract_python_version, versioned_name
 
 ROOT = Path(__file__).parent.parent

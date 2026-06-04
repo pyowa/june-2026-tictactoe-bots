@@ -18,7 +18,7 @@ from sqlalchemy import select
 
 from db.database import get_session, record_match
 from db.models.bot import Bot
-from messaging import BROKER_URL
+from messaging.client import BROKER_URL
 from messaging.queue import MATCHES_QUEUE
 from messaging.routing import turn_queue_for
 from messaging.rpc import RpcClient

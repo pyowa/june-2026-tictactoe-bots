@@ -16,7 +16,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models.bot import Bot
-from messaging import MatchJob, get_queue, pick_python_version
+from messaging.client import get_queue
+from messaging.queue import MatchJob
+from messaging.routing import pick_python_version
 
 # Python versions we accept on upload. The fleet of turn workers is sized
 # to this set — adding a new version means adding a worker for it. When the
