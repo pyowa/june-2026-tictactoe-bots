@@ -17,7 +17,7 @@ import aio_pika
 
 from messaging.client import BROKER_URL
 from messaging.routing import turn_queue_for
-from messaging.rpc import serve_rpc
+from messaging.rpc_server import serve_rpc
 
 WORKER_PYTHON_VERSION = os.environ.get("WORKER_PYTHON_VERSION", "3")
 TURN_TIMEOUT = int(os.environ.get("TURN_TIMEOUT", "5"))

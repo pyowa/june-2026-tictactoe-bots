@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from messaging.routing import pick_python_version, turn_queue_for
-from messaging.rpc import RpcClient
+from messaging.rpc_client import RpcClient
 
 # ---------------------------------------------------------------------------
 # Routing helpers

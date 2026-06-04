@@ -21,7 +21,7 @@ from db.models.bot import Bot
 from messaging.client import BROKER_URL
 from messaging.queue import MATCHES_QUEUE
 from messaging.routing import turn_queue_for
-from messaging.rpc import RpcClient
+from messaging.rpc_client import RpcClient
 from runner.engine import (
     EMPTY_BOARD,
     Board,
