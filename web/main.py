@@ -1,6 +1,8 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Cookie, FastAPI, File, Query, Request, UploadFile
+from fastapi import Cookie, Depends, FastAPI, File, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -14,11 +16,28 @@ from db.database import (
     list_bots,
     list_matches,
 )
+from messaging.client import make_queue
+from messaging.queue import Queue
+from web.dependencies import get_queue
 from web.submit import handle_submission
 from web.templates import not_found, templates
 from web.utils import group_matches_by_version
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Create the process-wide queue at startup, close it at shutdown.
+    Routes reach it via the `get_queue` dependency, tests substitute a fake
+    via `app.dependency_overrides[get_queue]`."""
+    queue = make_queue()
+    app.state.queue = queue
+    try:
+        yield
+    finally:
+        await queue.close()
+
+
+app = FastAPI(lifespan=lifespan)
 app.mount(
     "/static",
     StaticFiles(directory=Path(__file__).parent / "static"),
@@ -38,8 +57,9 @@ async def submit_bot(
     request: Request,
     file: UploadFile = File(...),
     ttt_owned_bots: str | None = Cookie(default=None),
+    queue: Queue = Depends(get_queue),
 ) -> HTMLResponse:
-    return await handle_submission(request, file, ttt_owned_bots)
+    return await handle_submission(request, file, ttt_owned_bots, queue)
 
 
 @app.get("/leaderboard", response_class=HTMLResponse)

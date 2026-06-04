@@ -28,7 +28,7 @@ async def test_enqueue_all_pairs_emits_n_squared_jobs_with_max_python_version(
     b = db_insert_bot(engine, "Beta", python_version="3.13")
     c = db_insert_bot(engine, "Gamma", python_version="3.12")
 
-    count = await enqueue_all_pairs(engine)
+    count = await enqueue_all_pairs(engine, mock_queue)
 
     assert count == 9  # 3 bots -> 3*3 ordered pairs (self-pairs included)
     assert len(mock_queue.messages) == 9
@@ -51,7 +51,7 @@ async def test_enqueue_all_pairs_emits_n_squared_jobs_with_max_python_version(
 async def test_enqueue_all_pairs_with_no_bots_emits_nothing(
     engine: Engine, mock_queue: _RecordingQueue
 ) -> None:
-    count = await enqueue_all_pairs(engine)
+    count = await enqueue_all_pairs(engine, mock_queue)
     assert count == 0
     assert mock_queue.messages == []
 
@@ -77,6 +77,7 @@ def test_main_inserts_bots_and_enqueues_match_jobs(
     _write_bot(tmp_path, "alpha.py", "name: Alpha\npython: 3.11")
     _write_bot(tmp_path, "beta.py", "name: Beta")  # default python version
     monkeypatch.setattr(seed, "EXAMPLE_BOTS_DIR", tmp_path)
+    monkeypatch.setattr(seed, "make_queue", lambda: mock_queue)
 
     main()
 
@@ -119,6 +120,7 @@ def test_main_auto_versions_duplicate_names(
     _write_bot(tmp_path, "foo_a.py", "name: Foo")
     _write_bot(tmp_path, "foo_b.py", "name: Foo")
     monkeypatch.setattr(seed, "EXAMPLE_BOTS_DIR", tmp_path)
+    monkeypatch.setattr(seed, "make_queue", lambda: mock_queue)
 
     main()
 
@@ -144,6 +146,7 @@ def test_main_skips_files_without_name_field(
     _write_bot(tmp_path, "nameless.py", "no name here")
     _write_bot(tmp_path, "good.py", "name: Good")
     monkeypatch.setattr(seed, "EXAMPLE_BOTS_DIR", tmp_path)
+    monkeypatch.setattr(seed, "make_queue", lambda: mock_queue)
 
     main()
 
@@ -170,6 +173,7 @@ def test_main_with_empty_directory_prints_and_returns(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(seed, "EXAMPLE_BOTS_DIR", tmp_path)
+    monkeypatch.setattr(seed, "make_queue", lambda: mock_queue)
 
     main()
 

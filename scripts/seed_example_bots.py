@@ -14,8 +14,8 @@ from pathlib import Path
 from sqlalchemy import Engine, text
 
 from db.database import create_sync_engine
-from messaging.client import get_queue
-from messaging.queue import MatchJob
+from messaging.client import make_queue
+from messaging.queue import MatchJob, Queue
 from messaging.routing import pick_python_version
 from web.utils import extract_bot_name, extract_python_version, versioned_name
 
@@ -23,7 +23,7 @@ ROOT = Path(__file__).parent.parent
 EXAMPLE_BOTS_DIR = ROOT / "example_bots"
 
 
-async def enqueue_all_pairs(engine: Engine) -> int:
+async def enqueue_all_pairs(engine: Engine, queue: Queue) -> int:
     """Enqueue one MatchJob per ordered pair (including self-pairs) so the
     orchestrator gets the full Cartesian product to work through."""
     with engine.connect() as conn:
@@ -31,7 +31,6 @@ async def enqueue_all_pairs(engine: Engine) -> int:
             text("SELECT id, python_version FROM bots ORDER BY id")
         ).fetchall()
 
-    queue = get_queue()
     count = 0
     for x_id, x_py in rows:
         for o_id, o_py in rows:
@@ -96,9 +95,13 @@ def main() -> None:
             inserted += 1
             print(f"  {src.name:30s} -> {v_name}")
 
-    queued = asyncio.run(enqueue_all_pairs(engine))
+    queue = make_queue()
+    queued = asyncio.run(enqueue_all_pairs(engine, queue))
     print(f"\nInserted {inserted} bots, enqueued {queued} match jobs to matches.todo.")
-    print("Run `poe start` (or just the orchestrator + worker) to play them out.")
+    print(
+        "Run `docker compose up -d` to start the orchestrator + workers "
+        "and play them out."
+    )
 
 
 if __name__ == "__main__":

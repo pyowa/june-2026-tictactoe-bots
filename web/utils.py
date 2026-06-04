@@ -16,8 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models.bot import Bot
-from messaging.client import get_queue
-from messaging.queue import MatchJob
+from messaging.queue import MatchJob, Queue
 from messaging.routing import pick_python_version
 
 # Python versions we accept on upload. The fleet of turn workers is sized
@@ -135,12 +134,14 @@ def group_matches_by_version(
 
 
 async def enqueue_match_pairs(
-    session: AsyncSession, new_bot_id: int, new_python_version: str
+    queue: Queue,
+    session: AsyncSession,
+    new_bot_id: int,
+    new_python_version: str,
 ) -> None:
     """Enqueue one MatchJob per unplayed pair involving the newly inserted
     bot. Includes the self-pair (`new` vs `new`). The chosen Python version
     is `max(new, other)` so older bots run on newer interpreters."""
-    queue = get_queue()
     result = await session.execute(select(Bot.id, Bot.python_version))
     rows = result.all()
     for other_id, other_py in rows:

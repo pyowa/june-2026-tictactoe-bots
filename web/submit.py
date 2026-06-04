@@ -21,6 +21,7 @@ from db.database import (
     list_bots,
 )
 from db.models.bot import Bot
+from messaging.queue import Queue
 from web.templates import render_index_response, templates
 from web.utils import (
     encode_cookie,
@@ -144,6 +145,7 @@ async def handle_submission(
     request: Request,
     file: UploadFile,
     owned_bots_cookie: str | None,
+    queue: Queue,
 ) -> HTMLResponse:
     """Top-level handler for POST /submit. Reads the uploaded source,
     validates it, persists the bot, enqueues match jobs, and renders either
@@ -157,7 +159,7 @@ async def handle_submission(
             name, new_bot_id = await _persist_bot(
                 session, bot_name, owner_token, python_version, source_bytes
             )
-            await enqueue_match_pairs(session, new_bot_id, python_version)
+            await enqueue_match_pairs(queue, session, new_bot_id, python_version)
             bots = await list_bots(session)
     except _SubmissionError as exc:
         return render_index_response(request, error=exc.message)

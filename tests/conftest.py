@@ -7,10 +7,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine, text
 
 import db.database
-import messaging.client
 import web.main
 from db.models.base import Base
 from messaging.queue import MatchJob
+from web.dependencies import get_queue
 
 BOT_TEMPLATE = '"""\nname: {name}\n"""\nimport sys\n'
 
@@ -103,9 +103,9 @@ class _RecordingQueue:
 @pytest.fixture()
 def mock_queue() -> Iterator[_RecordingQueue]:
     queue = _RecordingQueue()
-    messaging.client.set_queue(queue)
+    web.main.app.dependency_overrides[get_queue] = lambda: queue
     yield queue
-    messaging.client.set_queue(None)
+    web.main.app.dependency_overrides.clear()
 
 
 @pytest.fixture()
