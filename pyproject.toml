@@ -70,11 +70,11 @@ ignore = ["ANN401"]
 "scripts/*" = ["ANN"]
 
 [tool.pytest.ini_options]
-addopts = "--cov=web --cov=db --cov=runner --cov=messaging --cov-report=term-missing"
+addopts = "--cov=web --cov=db --cov=runner --cov=messaging --cov=scripts --cov-report=term-missing"
 asyncio_mode = "auto"
 
 [tool.coverage.run]
-omit = ["bots/*", "scripts/*", "tests/*", "example_bots/*"]
+omit = ["bots/*", "tests/*", "example_bots/*"]
 # Use Python's sys.monitoring (Python 3.12+); the default sys.settrace tracer
 # misses lines inside async with blocks that go through @asynccontextmanager.
 core = "sysmon"
