@@ -46,10 +46,41 @@ services:
       - "5672:5672"    # AMQP
       - "15672:15672"  # management UI: http://localhost:15672 (guest/guest)
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      # `ping` alone passes when the Erlang VM is up but BEFORE the AMQP
+      # listener is accepting connections — consumers (workers/orchestrator)
+      # then crash on first connect. `check_port_connectivity` only passes
+      # once the listener is actually bound, so dependents start safely.
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
       interval: 5s
-      timeout: 5s
+      timeout: 10s
       retries: 20
+      start_period: 10s
+
+  # One-shot migration runner. Starts after `db` is healthy, runs
+  # `alembic upgrade head`, and exits. `web` and `orchestrator` wait on this
+  # via `service_completed_successfully` so they never start against an
+  # un-migrated schema. Reuses the `orchestrator` image (already has alembic +
+  # the models). On warm start (no pending migrations) this exits in <1s.
+  migrate:
+    build:
+      context: .
+      target: orchestrator
+      args:
+        PY_VERSION: "3.13"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://ttt:ttt@db:5432/ttt
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./web:/app/web
+      - ./runner:/app/runner
+      - ./db:/app/db
+      - ./messaging:/app/messaging
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+    restart: "no"
 
   web:
     build:
@@ -65,6 +96,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       rabbitmq:
         condition: service_healthy
     volumes:
@@ -92,6 +125,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       rabbitmq:
         condition: service_healthy
     volumes:
