@@ -53,4 +53,4 @@ When your change touches any of the below, update the docs **in the same change*
 
 - Investigate the root cause. Don't paper over symptoms — if a test fails after your change, work out whether the test was right or the code was right before "fixing" either.
 - If you encounter unfamiliar files, branches, or local changes you didn't make, surface them in your report instead of deleting or overwriting them.
-- If `poe check` is green but the behavior feels off, run the actual scenario (start the app via `poe start`, hit the endpoint, watch the orchestrator + worker logs) before declaring success.
+- If `poe check` is green but the behavior feels off, run the actual scenario (bring the stack up via `poe up`, hit the endpoint, watch the orchestrator + worker logs with `docker compose logs -f orchestrator worker-py312`) before declaring success.

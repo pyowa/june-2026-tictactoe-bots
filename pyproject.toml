@@ -40,7 +40,6 @@ typecheck    = "ty check web/ db/ runner/ messaging/"
 seed-examples = "python -m scripts.seed_example_bots"
 migrate      = "alembic upgrade head"
 reset-db     = "python -m scripts.reset_db"
-start        = "docker compose up"
 up           = "docker compose up -d"
 down         = "docker compose down"
 

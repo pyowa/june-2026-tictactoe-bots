@@ -101,10 +101,10 @@ Defaults: Postgres at `postgresql+asyncpg://ttt:ttt@localhost:5432/ttt`, RabbitM
 ### Start
 
 ```bash
-uv run poe start
+uv run poe up
 ```
 
-`poe start` is `docker compose up` in the foreground — web, orchestrator, the per-Python-version turn workers, Postgres, and RabbitMQ all come up together. Open `http://localhost:8000`. Ctrl+C stops them. `uv run poe down` stops everything in the background-detached case. RabbitMQ's management UI is at `http://localhost:15672` (`guest`/`guest`).
+`poe up` is `docker compose up -d` — web, orchestrator, the per-Python-version turn workers, Postgres, and RabbitMQ all come up in the background. Open `http://localhost:8000`. Stream logs from any service with `docker compose logs -f <service>` (e.g. `web`, `orchestrator`, `worker-py312`). `uv run poe down` stops everything. RabbitMQ's management UI is at `http://localhost:15672` (`guest`/`guest`).
 
 Source code is bind-mounted into the containers, so editing files under `web/`, `runner/`, `db/`, or `messaging/` is picked up immediately by the web server's `--reload`. The orchestrator and workers don't auto-reload — restart them with `docker compose restart orchestrator worker-py310 worker-py311 worker-py312 worker-py313 worker-py314` after editing their code. Only `pyproject.toml` / `uv.lock` changes require a `docker compose build`.
 
@@ -201,7 +201,6 @@ Stack: FastAPI · SQLAlchemy 2.x (async, `asyncpg`) on Postgres · RabbitMQ (`ai
 
 | Command | Description |
 |---|---|
-| `uv run poe start` | Whole stack in the foreground via `docker compose up` (Ctrl+C stops it) |
 | `uv run poe up` | Whole stack detached (`docker compose up -d`) |
 | `uv run poe down` | Stop every compose service |
 | `uv run poe dev` | Host-only web server with auto-reload (bring up `db` and `rabbitmq` yourself with `docker compose up -d db rabbitmq` first) |
