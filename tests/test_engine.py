@@ -47,6 +47,22 @@ def test_parse_board_invalid_symbol() -> None:
     assert parse_board("X|Y|.\n.|.|.\n.|.|.") is None
 
 
+def test_parse_board_rejects_z_symbol() -> None:
+    # A second rejection case to lock the `c in ("X", "O", ".")` cell whitelist
+    # — flipping it to include any letter would still pass the "Y" test if Y
+    # got added to the whitelist; this catches a broader regression.
+    assert parse_board("Z|.|.\n.|.|.\n.|.|.") is None
+
+
+def test_parse_board_strips_trailing_whitespace_and_newlines() -> None:
+    """`text.strip().splitlines()` tolerates a trailing blank line (common
+    when a subprocess prints with `print()` and emits an extra `\\n`).
+    Without `.strip()`, the trailing empty line would make `len(rows) == 4`
+    and the board would be rejected."""
+    board = parse_board("X|.|.\n.|.|.\n.|.|.\n\n")
+    assert board == [["X", ".", "."], [".", ".", "."], [".", ".", "."]]
+
+
 # ---------------------------------------------------------------------------
 # board_to_str
 # ---------------------------------------------------------------------------

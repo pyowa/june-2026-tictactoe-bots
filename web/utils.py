@@ -8,7 +8,6 @@ caller (no global FastAPI state).
 
 import ast
 import json
-import re
 import urllib.parse
 from typing import Any
 
@@ -32,7 +31,6 @@ SUPPORTED_PYTHON_VERSIONS: tuple[str, ...] = (
 )
 DEFAULT_PYTHON_VERSION = SUPPORTED_PYTHON_VERSIONS[-1]
 
-_VERSIONED_RE = re.compile(r"^(.+)V\d+$")
 
 
 def extract_bot_name(source: str) -> str | None:
@@ -87,12 +85,6 @@ def extract_python_version(source: str) -> str | None:
             return None  # present but not supported
 
     return DEFAULT_PYTHON_VERSION
-
-
-def implied_base(name: str) -> str | None:
-    """If `name` looks like FooV2, return Foo. Otherwise return None."""
-    m = _VERSIONED_RE.match(name)
-    return m.group(1) if m else None
 
 
 def versioned_name(base_name: str, version: int) -> str:

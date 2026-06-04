@@ -5,6 +5,8 @@ from typing import Any
 import pytest
 from sqlalchemy import Engine, text
 
+from db.database import get_session, record_match
+from runner.engine import MatchResult, Move
 from runner.orchestrator import (
     fetch_bot_sources,
     handle_match_message,
@@ -88,6 +90,20 @@ async def test_play_match_x_forfeits_on_unparseable_board() -> None:
     result = await play_match_rpc(rpc, b"", b"", "3")
     assert result.result == "x_forfeit"
     assert "unparseable" in (result.moves[-1].error or "")
+
+
+@pytest.mark.asyncio
+async def test_play_match_forfeit_uses_no_output_fallback_on_empty_response() -> None:
+    """Worker returns `{}` — no error, no board. Persisted move's error
+    must be exactly `"no output"`, not None / empty string."""
+
+    class _EmptyDictRpc:
+        async def call(self, target_queue, payload, timeout=10.0):
+            return b"{}"
+
+    result = await play_match_rpc(_EmptyDictRpc(), b"", b"", "3")
+    assert result.result == "x_forfeit"
+    assert result.moves[-1].error == "no output"
 
 
 @pytest.mark.asyncio
@@ -275,6 +291,86 @@ async def test_handle_match_message_persists_result(
         row = conn.execute(
             text("SELECT result, winner_id FROM matches")
         ).first()
+        # Each persisted Move row's bot_id must agree with its player symbol:
+        # X moves are owned by bot_x, O moves by bot_o. Pair them up rather
+        # than just counting rows so a flipped mapping in `record_match` is
+        # caught.
+        move_rows = conn.execute(
+            text(
+                "SELECT move_number, bot_id, board_state FROM moves "
+                "ORDER BY move_number"
+            )
+        ).all()
     assert row is not None
     assert row[0] == "x_wins"
     assert row[1] == a
+
+    # Odd-numbered moves (1, 3, 5) are X turns; even-numbered (2, 4) are O.
+    assert len(move_rows) == 5
+    for move_number, bot_id, _board_state in move_rows:
+        if move_number % 2 == 1:
+            assert bot_id == a, (
+                f"move #{move_number} was an X turn but bot_id={bot_id} "
+                f"(expected bot_x_id={a})"
+            )
+        else:
+            assert bot_id == b, (
+                f"move #{move_number} was an O turn but bot_id={bot_id} "
+                f"(expected bot_o_id={b})"
+            )
+
+
+# ---------------------------------------------------------------------------
+# record_match — forfeit result -> winner_id mapping.
+# These call record_match directly (no broker, no RPC) because the mapping is
+# the entire surface under test.
+# ---------------------------------------------------------------------------
+
+
+async def test_record_match_x_forfeit_credits_o_as_winner(
+    engine: Engine, _bound_db: None
+) -> None:
+    """When X forfeits, the *non*-forfeiting bot (O) must be the winner."""
+    bot_x_id = db_insert_bot(engine, "Alpha")
+    bot_o_id = db_insert_bot(engine, "Beta")
+
+    result = MatchResult(
+        result="x_forfeit",
+        moves=[Move(1, "x", ".|.|.\n.|.|.\n.|.|.", "timeout after 5s")],
+    )
+    async with get_session() as session:
+        await record_match(session, bot_x_id, bot_o_id, result)
+
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT result, winner_id FROM matches")
+        ).first()
+    assert row is not None
+    assert row[0] == "x_forfeit"
+    assert row[1] == bot_o_id
+
+
+async def test_record_match_o_forfeit_credits_x_as_winner(
+    engine: Engine, _bound_db: None
+) -> None:
+    """When O forfeits, the *non*-forfeiting bot (X) must be the winner."""
+    bot_x_id = db_insert_bot(engine, "Alpha")
+    bot_o_id = db_insert_bot(engine, "Beta")
+
+    result = MatchResult(
+        result="o_forfeit",
+        moves=[
+            Move(1, "x", "X|.|.\n.|.|.\n.|.|."),
+            Move(2, "o", "X|.|.\n.|.|.\n.|.|.", "no move made"),
+        ],
+    )
+    async with get_session() as session:
+        await record_match(session, bot_x_id, bot_o_id, result)
+
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT result, winner_id FROM matches")
+        ).first()
+    assert row is not None
+    assert row[0] == "o_forfeit"
+    assert row[1] == bot_x_id

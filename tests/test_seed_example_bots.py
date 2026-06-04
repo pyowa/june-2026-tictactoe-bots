@@ -164,6 +164,32 @@ def test_main_skips_files_without_name_field(
     assert len(mock_queue.messages) == 1
 
 
+def test_main_falls_back_to_python_3_when_version_unsupported(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    engine: Engine,
+    mock_queue: _RecordingQueue,
+    _bound_db: None,
+) -> None:
+    """A bot declaring `python: 9.99` is unparseable/unsupported, so
+    `extract_python_version` returns None. The seed script must fall back
+    to "3" rather than persisting NULL or crashing."""
+    _write_bot(tmp_path, "weird.py", "name: Weird\npython: 9.99")
+    monkeypatch.setattr(seed, "EXAMPLE_BOTS_DIR", tmp_path)
+    monkeypatch.setattr(seed, "make_queue", lambda: mock_queue)
+
+    main()
+
+    with engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT python_version FROM bots WHERE base_name = 'Weird'"
+            )
+        ).first()
+    assert row is not None
+    assert row[0] == "3"
+
+
 def test_main_with_empty_directory_prints_and_returns(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

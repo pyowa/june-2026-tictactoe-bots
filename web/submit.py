@@ -6,6 +6,7 @@ the flow is split into small steps; failed validation in any step raises
 error response. Happy-path code therefore reads top-to-bottom with no
 sentinel returns."""
 
+import re
 import secrets
 
 from fastapi import Request, UploadFile
@@ -28,10 +29,15 @@ from web.utils import (
     enqueue_match_pairs,
     extract_bot_name,
     extract_python_version,
-    implied_base,
     parse_cookie,
     versioned_name,
 )
+
+# Names ending in `V<digits>` are reserved — the auto-versioning system
+# produces exactly that suffix for v2+, so accepting them as user input
+# would create ambiguity (uploading "FooV9" alongside an auto-generated
+# "FooV9" from "Foo" v9).
+_RESERVED_VERSION_SUFFIX = re.compile(r"V\d+$")
 
 
 class _SubmissionError(Exception):
@@ -57,6 +63,12 @@ def _validate_source(source_bytes: bytes) -> tuple[str, str]:
             "Your bot must start with a docstring containing 'name: <name>'."
         )
 
+    if _RESERVED_VERSION_SUFFIX.search(bot_name):
+        raise _SubmissionError(
+            f"Bot name '{bot_name}' ends in 'V<digits>', which is "
+            "reserved for auto-versioning. Pick a different name."
+        )
+
     python_version = extract_python_version(source)
     if python_version is None:
         raise _SubmissionError(
@@ -70,18 +82,9 @@ def _validate_source(source_bytes: bytes) -> tuple[str, str]:
 async def _resolve_owner_token(
     session: AsyncSession, bot_name: str, owned: dict[str, str]
 ) -> str:
-    """Return the owner token to use for this submission.
-
-    Raises `_SubmissionError` if `bot_name` looks like a versioned name
-    whose base already exists, or if the base is owned by somebody whose
-    cookie doesn't match. Mints a fresh token when the name is unclaimed."""
-    base = implied_base(bot_name)
-    if base and await get_owner_token(session, base) is not None:
-        raise _SubmissionError(
-            f"'{bot_name}' looks like a versioned name. "
-            f"Submit as '{base}' and versioning is handled automatically."
-        )
-
+    """Return the owner token to use for this submission. Raises
+    `_SubmissionError` if the name is owned by someone whose cookie doesn't
+    match. Mints a fresh token when the name is unclaimed."""
     existing_token = await get_owner_token(session, bot_name)
     if existing_token:
         if owned.get(bot_name) != existing_token:

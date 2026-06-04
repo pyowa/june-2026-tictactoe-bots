@@ -536,3 +536,21 @@ def test_bot_family_intra_family_match_appears_under_both_versions(client, engin
     assert body.count("MyBotV2 won") == 2
 
 
+def test_bot_family_self_match_appears_exactly_once(client, engine):
+    """A true self-pair (bot_x_id == bot_o_id) must NOT be double-counted
+    under the bot's version section. Guards `group_matches_by_version` from
+    regressing on the `m.bot_o != m.bot_x` dedup."""
+    foo = db_insert_bot(engine, "Foo")
+    match_id = db_insert_match(engine, foo, foo, winner_id=foo, result="x_wins")
+
+    resp = client.get("/bots/Foo")
+    body = resp.text
+    # The match-detail link is unique per row, so counting it is a precise
+    # proxy for "how many times did this match render?".
+    link = f"/bots/Foo/matches/{match_id}"
+    assert body.count(link) == 1, (
+        f"self-match should render once, but found {body.count(link)} "
+        f"occurrences of {link!r}"
+    )
+
+

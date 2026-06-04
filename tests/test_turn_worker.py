@@ -39,11 +39,45 @@ def test_run_bot_subprocess_captures_stderr_on_empty_stdout() -> None:
     assert "boom" in (response["error"] or "")
 
 
+def test_run_bot_subprocess_empty_stdout_empty_stderr_no_trailing_colon() -> None:
+    """When the bot writes nothing to stdout AND nothing to stderr, the
+    error must be exactly `invalid output: empty response` — no trailing
+    colon (the `detail = f": {stderr}" if stderr else ""` branch)."""
+    bot = b"import sys\nsys.exit(0)\n"
+    response = run_bot_subprocess(bot, "X", ".|.|.\n.|.|.\n.|.|.")
+    assert response["board"] is None
+    assert response["error"] == "invalid output: empty response"
+
+
 def test_run_bot_subprocess_times_out() -> None:
     slow = b"import time\ntime.sleep(60)\n"
     response = run_bot_subprocess(slow, "X", ".|.|.\n.|.|.\n.|.|.", timeout=1)
     assert response["board"] is None
     assert "timeout" in (response["error"] or "")
+
+
+def test_run_bot_subprocess_cleans_up_tmpfile_after_run() -> None:
+    """The `finally: os.unlink(tmpfile_path)` block must remove the tmpfile
+    even on a successful run. Capture the path NamedTemporaryFile produces,
+    then assert it's gone."""
+    import os
+    import tempfile as real_tempfile
+    from unittest.mock import patch
+
+    captured_paths: list[str] = []
+    real_factory = real_tempfile.NamedTemporaryFile
+
+    def capturing_factory(*args, **kwargs):
+        handle = real_factory(*args, **kwargs)
+        captured_paths.append(handle.name)
+        return handle
+
+    with patch("runner.turn_worker.tempfile.NamedTemporaryFile", capturing_factory):
+        run_bot_subprocess(SIMPLE_BOT, "X", ".|.|.\n.|.|.\n.|.|.")
+
+    assert captured_paths, "expected NamedTemporaryFile to be called"
+    for path in captured_paths:
+        assert not os.path.exists(path), f"tmpfile {path} was not cleaned up"
 
 
 def test_run_bot_subprocess_catches_unexpected_exception() -> None:

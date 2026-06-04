@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 import web.main
 from tests.conftest import upload
-from web.utils import extract_python_version
+from web.utils import extract_bot_name, extract_python_version
 
 
 def read_owned_cookie(client: TestClient) -> dict:
@@ -22,10 +22,16 @@ def test_fresh_submission_succeeds(client):
 
 
 def test_fresh_submission_sets_ownership_cookie(client):
-    upload(client, "MyBot")
+    resp = upload(client, "MyBot")
     owned = read_owned_cookie(client)
     assert "MyBot" in owned
     assert len(owned["MyBot"]) == 64  # secrets.token_hex(32)
+    # Assert security flags on the raw Set-Cookie header — `response.cookies`
+    # is a parsed jar that doesn't preserve attribute flags reliably.
+    set_cookie = resp.headers["set-cookie"]
+    assert "ttt_owned_bots=" in set_cookie
+    assert "HttpOnly" in set_cookie
+    assert "SameSite=lax" in set_cookie
 
 
 def test_missing_docstring_rejected(client):
@@ -80,21 +86,28 @@ def test_different_bots_owned_independently(client):
     assert "BetaBot" in owned
 
 
-def test_versioned_name_rejected_when_base_exists(client):
+def test_name_ending_in_v_digit_rejected_always(client):
+    """Bot names ending in 'V<digits>' are reserved for the auto-versioning
+    system — rejected even if no prior bot with the base exists."""
+    resp = upload(client, "MyBotV9")
+    assert "reserved for auto-versioning" in resp.text
+
+
+def test_name_ending_in_v_digit_rejected_when_base_exists(client):
     upload(client, "TestBot")
     resp = upload(client, "TestBotV2")
-    assert "versioned name" in resp.text
+    assert "reserved for auto-versioning" in resp.text
 
 
-def test_versioned_name_allowed_when_base_does_not_exist(client):
-    resp = upload(client, "TestBotV2")
+def test_name_with_v_digits_not_at_end_accepted(client):
+    """'FooV2X' contains V<digits> but not at the end; not reserved."""
+    resp = upload(client, "FooV2X")
     assert "submitted successfully" in resp.text
 
 
-def test_versioned_name_rejected_for_higher_versions(client):
-    upload(client, "TestBot")
-    resp = upload(client, "TestBotV10")
-    assert "versioned name" in resp.text
+def test_name_with_no_v_accepted(client):
+    resp = upload(client, "Bot1")
+    assert "submitted successfully" in resp.text
 
 
 def test_syntax_error_in_source_rejected(client):
@@ -204,6 +217,63 @@ def test_extract_python_version_no_python_field_returns_default() -> None:
     from web.utils import DEFAULT_PYTHON_VERSION
     source = '"""\nname: MyBot\n"""\nimport sys\n'
     assert extract_python_version(source) == DEFAULT_PYTHON_VERSION
+
+
+# ---------------------------------------------------------------------------
+# extract_bot_name — unit tests for defensive branches
+# ---------------------------------------------------------------------------
+
+
+def test_extract_bot_name_syntax_error() -> None:
+    assert extract_bot_name("def (:\n") is None
+
+
+def test_extract_bot_name_empty_file() -> None:
+    assert extract_bot_name("") is None
+
+
+def test_extract_bot_name_non_string_constant() -> None:
+    assert extract_bot_name("42\n") is None
+
+
+def test_extract_bot_name_first_node_not_expr() -> None:
+    assert extract_bot_name("import sys\n") is None
+
+
+def test_extract_bot_name_empty_name_value_returns_none() -> None:
+    source = '"""\nname:   \n"""\nimport sys\n'
+    assert extract_bot_name(source) is None
+
+
+def test_extract_bot_name_no_name_field_returns_none() -> None:
+    source = '"""\npython: 3.12\n"""\nimport sys\n'
+    assert extract_bot_name(source) is None
+
+
+def test_extract_bot_name_returns_name_when_present() -> None:
+    source = '"""\nname: MyBot\n"""\nimport sys\n'
+    assert extract_bot_name(source) == "MyBot"
+
+
+# ---------------------------------------------------------------------------
+# DEFAULT_PYTHON_VERSION pin — keep the constant aligned with the supported tuple
+# ---------------------------------------------------------------------------
+
+
+def test_default_python_version_pins_to_last_supported() -> None:
+    from web.utils import DEFAULT_PYTHON_VERSION, SUPPORTED_PYTHON_VERSIONS
+    assert DEFAULT_PYTHON_VERSION == SUPPORTED_PYTHON_VERSIONS[-1]
+    assert DEFAULT_PYTHON_VERSION == "3.14"
+
+
+# ---------------------------------------------------------------------------
+# parse_cookie — fallback when the value is not JSON
+# ---------------------------------------------------------------------------
+
+
+def test_parse_cookie_returns_empty_dict_on_invalid_json() -> None:
+    from web.utils import parse_cookie
+    assert parse_cookie("not-json") == {}
 
 
 # ---------------------------------------------------------------------------
