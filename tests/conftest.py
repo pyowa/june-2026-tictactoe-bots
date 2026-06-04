@@ -1,14 +1,19 @@
 import os
 from collections.abc import Iterator
+from datetime import datetime
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine, text
+from sqlalchemy.orm import Session
 
 import db.database
 import web.main
 from db.models.base import Base
+from db.models.bot import Bot
+from db.models.match import Match
+from db.models.move import Move
 from messaging.queue import MatchJob
 from web.dependencies import get_queue
 
@@ -126,27 +131,22 @@ def db_insert_bot(
     base_name: str,
     submitted_at: str | None = None,
     python_version: str = "3",
+    version: int = 1,
+    versioned_name: str | None = None,
 ) -> int:
-    sql = text(
-        """
-        INSERT INTO bots
-            (base_name, versioned_name, version, owner_token,
-             python_version, submitted_at)
-        VALUES (:bn, :bn, 1, 'token',
-                :pv, COALESCE(CAST(:sa AS timestamp), CURRENT_TIMESTAMP))
-        RETURNING id
-        """
-    )
-    with engine.begin() as conn:
-        result = conn.execute(
-            sql,
-            {
-                "bn": base_name,
-                "pv": python_version,
-                "sa": submitted_at,
-            },
+    with Session(engine) as session, session.begin():
+        bot = Bot(
+            base_name=base_name,
+            versioned_name=versioned_name if versioned_name is not None else base_name,
+            version=version,
+            owner_token="token",
+            python_version=python_version,
         )
-        return result.scalar_one()
+        if submitted_at is not None:
+            bot.submitted_at = datetime.fromisoformat(submitted_at)
+        session.add(bot)
+        session.flush()
+        return bot.id
 
 
 def db_insert_match(
@@ -157,26 +157,18 @@ def db_insert_match(
     result: str,
     played_at: str | None = None,
 ) -> int:
-    sql = text(
-        """
-        INSERT INTO matches (bot_x_id, bot_o_id, winner_id, result, played_at)
-        VALUES (:bx, :bo, :w, :r,
-                COALESCE(CAST(:pa AS timestamp), CURRENT_TIMESTAMP))
-        RETURNING id
-        """
-    )
-    with engine.begin() as conn:
-        res = conn.execute(
-            sql,
-            {
-                "bx": bot_x_id,
-                "bo": bot_o_id,
-                "w": winner_id,
-                "r": result,
-                "pa": played_at,
-            },
+    with Session(engine) as session, session.begin():
+        match = Match(
+            bot_x_id=bot_x_id,
+            bot_o_id=bot_o_id,
+            winner_id=winner_id,
+            result=result,
         )
-        return res.scalar_one()
+        if played_at is not None:
+            match.played_at = datetime.fromisoformat(played_at)
+        session.add(match)
+        session.flush()
+        return match.id
 
 
 def db_insert_move(
@@ -187,20 +179,13 @@ def db_insert_move(
     board_state: str,
     error: str | None = None,
 ) -> None:
-    sql = text(
-        """
-        INSERT INTO moves (match_id, move_number, bot_id, board_state, error)
-        VALUES (:m, :n, :b, :bs, :e)
-        """
-    )
-    with engine.begin() as conn:
-        conn.execute(
-            sql,
-            {
-                "m": match_id,
-                "n": move_number,
-                "b": bot_id,
-                "bs": board_state,
-                "e": error,
-            },
+    with Session(engine) as session, session.begin():
+        session.add(
+            Move(
+                match_id=match_id,
+                move_number=move_number,
+                bot_id=bot_id,
+                board_state=board_state,
+                error=error,
+            )
         )

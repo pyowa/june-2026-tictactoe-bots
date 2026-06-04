@@ -26,6 +26,22 @@ For non-feature work (renames, doc edits, dependency bumps) TDD doesn't apply �
 - Genuinely unreachable lines (e.g., broker-connection wiring that only fires against a real RabbitMQ) may be marked `# pragma: no cover` with a one-line reason. Prefer real tests over pragmas.
 - `if __name__ == "__main__":` blocks and `if TYPE_CHECKING:` imports are already excluded centrally (see `[tool.coverage.report] exclude_lines` in `pyproject.toml`) — don't add pragmas to those.
 
+## Database query style
+
+Default to SQLAlchemy **ORM** syntax, not Core. The ORM form reads top-to-bottom and is what we use across the codebase.
+
+- **Inserts**: `obj = Model(field=value, ...); session.add(obj); session.flush(); return obj.id` — not `insert(Model).values({Model.field: value, ...}).returning(Model.id)`.
+- **Updates**: `obj = session.get(Model, id); obj.field = value` — not `update(Model).where(Model.id == id).values(field=value)`.
+- **Deletes**: `session.delete(obj)` (after loading), or `session.execute(delete(Model).where(...))` only when bulk-deleting without a loaded object.
+- **Reads**: `select(Model).where(Model.field == value)` — this *is* ORM; Core is what would be `select(model_table.c.field)` against `Model.__table__`.
+- **Raw SQL via `text(...)`**: only when no ORM expression is available (system catalog queries, DDL like `CREATE DATABASE`/`TRUNCATE`, broker-side admin) — per the `text()` policy in TODO bullet 4.
+
+Why this is the default: ORM constructors give you readable code that reads in the order a human writes it, plus runtime kwarg validation (`Model(unknown_field=...)` raises immediately, not as a Postgres error after the round-trip).
+
+Core's `insert(Model).values({Model.field: value})` form gets you static type-checking of column references — `ty` flags `Model.field` if you rename the column — but at the cost of readability. The ORM form's constructor kwargs are dynamic and won't be flagged by `ty`. That's a real loss, but readability wins for everyday use.
+
+**If you want to reach for Core (`insert/update/delete` builders)**, surface it as a discussion *before* writing the code. Legitimate reasons: bulk operations on tens of thousands of rows where session.add() loops would be too slow; a `RETURNING` clause that doesn't fit the session lifecycle; performance-critical paths that the ORM can't express. Don't reach for Core to "make it more strongly typed" — that's the tradeoff we've explicitly accepted.
+
 ## Documentation that must stay in sync
 
 When your change touches any of the below, update the docs **in the same change**, not "later":

@@ -448,40 +448,27 @@ def test_bot_detail_links_to_nested_match_url(client, engine):
 # ---------------------------------------------------------------------------
 
 
-def _insert_versioned(engine, base_name, version, submitted_at):
-    """Insert a specific version of a bot family."""
-    from sqlalchemy import text
-    versioned = base_name if version == 1 else f"{base_name}V{version}"
-    sql = text(
-        """INSERT INTO bots
-           (base_name, versioned_name, version, owner_token,
-            python_version, submitted_at)
-           VALUES (:b, :v, :ver, :t, '3', CAST(:sa AS timestamp))
-           RETURNING id"""
-    )
-    with engine.begin() as conn:
-        result = conn.execute(
-            sql,
-            {
-                "b": base_name,
-                "v": versioned,
-                "ver": version,
-                "t": f"tok-{version}",
-                "sa": submitted_at,
-            },
-        )
-        return result.scalar_one()
-
-
 def test_bot_family_404_for_unknown_base_name(client):
     resp = client.get("/bots/NoSuchBot")
     assert resp.status_code == 404
 
 
 def test_bot_family_lists_all_versions_latest_first(client, engine):
-    _insert_versioned(engine, "MyBot", 1, "2024-01-01 10:00:00")
-    _insert_versioned(engine, "MyBot", 2, "2024-01-02 10:00:00")
-    _insert_versioned(engine, "MyBot", 3, "2024-01-03 10:00:00")
+    db_insert_bot(engine, "MyBot", submitted_at="2024-01-01 10:00:00")
+    db_insert_bot(
+        engine,
+        "MyBot",
+        submitted_at="2024-01-02 10:00:00",
+        version=2,
+        versioned_name="MyBotV2",
+    )
+    db_insert_bot(
+        engine,
+        "MyBot",
+        submitted_at="2024-01-03 10:00:00",
+        version=3,
+        versioned_name="MyBotV3",
+    )
 
     resp = client.get("/bots/MyBot")
     assert resp.status_code == 200
@@ -497,8 +484,14 @@ def test_bot_family_lists_all_versions_latest_first(client, engine):
 
 
 def test_bot_family_groups_matches_under_each_version(client, engine):
-    v1 = _insert_versioned(engine, "MyBot", 1, "2024-01-01 10:00:00")
-    v2 = _insert_versioned(engine, "MyBot", 2, "2024-01-02 10:00:00")
+    v1 = db_insert_bot(engine, "MyBot", submitted_at="2024-01-01 10:00:00")
+    v2 = db_insert_bot(
+        engine,
+        "MyBot",
+        submitted_at="2024-01-02 10:00:00",
+        version=2,
+        versioned_name="MyBotV2",
+    )
     other = db_insert_bot(engine, "OtherBot")
 
     # V1 plays Other (V1 wins); V2 plays Other (Other wins).
@@ -517,7 +510,7 @@ def test_bot_family_groups_matches_under_each_version(client, engine):
 
 
 def test_bot_family_shows_empty_state_for_version_with_no_matches(client, engine):
-    _insert_versioned(engine, "Lonely", 1, "2024-01-01 10:00:00")
+    db_insert_bot(engine, "Lonely", submitted_at="2024-01-01 10:00:00")
     resp = client.get("/bots/Lonely")
     assert "No matches yet" in resp.text
 
@@ -525,8 +518,14 @@ def test_bot_family_shows_empty_state_for_version_with_no_matches(client, engine
 def test_bot_family_intra_family_match_appears_under_both_versions(client, engine):
     """A match between V1 and V2 of the same family is shown under each
     version's section so the row appears twice on the page."""
-    v1 = _insert_versioned(engine, "MyBot", 1, "2024-01-01 10:00:00")
-    v2 = _insert_versioned(engine, "MyBot", 2, "2024-01-02 10:00:00")
+    v1 = db_insert_bot(engine, "MyBot", submitted_at="2024-01-01 10:00:00")
+    v2 = db_insert_bot(
+        engine,
+        "MyBot",
+        submitted_at="2024-01-02 10:00:00",
+        version=2,
+        versioned_name="MyBotV2",
+    )
     db_insert_match(engine, v1, v2, winner_id=v2, result="o_wins")
 
     resp = client.get("/bots/MyBot")
