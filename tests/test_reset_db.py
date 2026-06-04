@@ -10,7 +10,7 @@ from sqlalchemy import Engine, create_engine, text
 
 import db.database as d
 import scripts.reset_db as reset_db
-from db.models import Base
+from db.models.base import Base
 from scripts.reset_db import main, purge_rabbitmq_queues
 from tests.conftest import TEST_ASYNC_URL, TEST_SYNC_URL
 

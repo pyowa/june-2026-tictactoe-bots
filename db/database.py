@@ -12,7 +12,9 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool
 
-from db.models import Bot, Match, Move
+from db.models.bot import Bot
+from db.models.match import Match
+from db.models.move import Move
 from runner.engine import MatchResult
 
 DEFAULT_ASYNC_URL = "postgresql+asyncpg://ttt:ttt@localhost:5432/ttt"

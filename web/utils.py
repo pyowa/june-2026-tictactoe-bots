@@ -15,7 +15,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Bot
+from db.models.bot import Bot
 from messaging import MatchJob, get_queue, pick_python_version
 
 # Python versions we accept on upload. The fleet of turn workers is sized

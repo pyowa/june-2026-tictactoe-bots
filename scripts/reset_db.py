@@ -17,7 +17,7 @@ import urllib.request
 from sqlalchemy import text
 
 from db.database import DATABASE_URL, create_sync_engine
-from db.models import Base
+from db.models.base import Base
 
 RABBITMQ_MGMT_URL = "http://localhost:15672"
 RABBITMQ_USER = "guest"

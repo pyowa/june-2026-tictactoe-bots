@@ -20,7 +20,7 @@ from db.database import (
     insert_bot,
     list_bots,
 )
-from db.models import Bot
+from db.models.bot import Bot
 from web.templates import render_index_response, templates
 from web.utils import (
     encode_cookie,

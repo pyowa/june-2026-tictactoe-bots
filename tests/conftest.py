@@ -9,7 +9,7 @@ from sqlalchemy import Engine, create_engine, text
 import db.database
 import messaging
 import web.main
-from db.models import Base
+from db.models.base import Base
 from messaging.queue import MatchJob
 
 BOT_TEMPLATE = '"""\nname: {name}\n"""\nimport sys\n'
