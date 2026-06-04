@@ -19,7 +19,7 @@ python: 3.11
 """
 ```
 
-Valid `python:` values: a major version (`3`) or `major.minor` (`3.11`, `3.12`, `3.13`).
+Valid `python:` values are the actively supported Python releases: **`3.10`, `3.11`, `3.12`, `3.13`, `3.14`**. Omit the field and you'll get `3.14` (the latest). Anything else — a bare `3`, an unsupported `3.9`, `latest`, etc. — is rejected at upload.
 
 ### I/O protocol
 

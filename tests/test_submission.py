@@ -1,6 +1,7 @@
 import json
 import urllib.parse
 
+import pytest
 from fastapi.testclient import TestClient
 
 import web.main
@@ -126,25 +127,53 @@ def test_malformed_cookie_is_ignored(client):
     assert "submitted successfully" in resp.text
 
 
-def test_python_version_defaults_when_omitted(client):
+def test_python_version_defaults_when_omitted(client, engine):
+    """Omitted `python:` field → defaults to the latest supported version."""
+    from sqlalchemy import text
+
+    from web.main import DEFAULT_PYTHON_VERSION
     resp = upload(client, "MyBot")
     assert "submitted successfully" in resp.text
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT python_version FROM bots WHERE versioned_name = 'MyBot'")
+        ).first()
+    assert row is not None
+    assert row[0] == DEFAULT_PYTHON_VERSION
 
 
-def test_python_version_accepted_major_only(client):
-    source = b'"""\nname: MyBot\npython: 3\n"""\nimport sys\n'
-    resp = client.post("/submit", files={"file": ("bot.py", source, "text/plain")})
+@pytest.mark.parametrize("version", ["3.10", "3.11", "3.12", "3.13", "3.14"])
+def test_python_version_supported_versions_accepted(
+    client, engine, version: str
+) -> None:
+    from sqlalchemy import text
+    slug = version.replace(".", "_")
+    body = f'"""\nname: V{slug}\npython: {version}\n"""\nimport sys\n'.encode()
+    resp = client.post("/submit", files={"file": ("bot.py", body, "text/plain")})
     assert "submitted successfully" in resp.text
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT python_version FROM bots WHERE base_name LIKE 'V%' LIMIT 1")
+        ).first()
+    assert row is not None
+    assert row[0] == version
 
 
-def test_python_version_accepted_major_minor(client):
-    source = b'"""\nname: MyBot\npython: 3.11\n"""\nimport sys\n'
-    resp = client.post("/submit", files={"file": ("bot.py", source, "text/plain")})
-    assert "submitted successfully" in resp.text
-
-
-def test_python_version_invalid_rejected(client):
-    source = b'"""\nname: MyBot\npython: latest\n"""\nimport sys\n'
+@pytest.mark.parametrize(
+    "version",
+    [
+        "3",       # bare major — ambiguous, rejected
+        "3.9",     # too old
+        "3.15",    # not yet supported
+        "4.0",     # not a real Python
+        "2.7",     # not supported
+        "latest",  # not a version string
+        "3.11.4",  # patch-level not supported
+        "",        # empty
+    ],
+)
+def test_python_version_unsupported_versions_rejected(client, version: str) -> None:
+    source = f'"""\nname: MyBot\npython: {version}\n"""\nimport sys\n'.encode()
     resp = client.post("/submit", files={"file": ("bot.py", source, "text/plain")})
     assert "Invalid" in resp.text
     assert "python:" in resp.text
@@ -172,8 +201,9 @@ def test_extract_python_version_first_node_not_expr() -> None:
 
 
 def test_extract_python_version_no_python_field_returns_default() -> None:
+    from web.main import DEFAULT_PYTHON_VERSION
     source = '"""\nname: MyBot\n"""\nimport sys\n'
-    assert extract_python_version(source) == "3"
+    assert extract_python_version(source) == DEFAULT_PYTHON_VERSION
 
 
 # ---------------------------------------------------------------------------
@@ -218,11 +248,12 @@ def test_resubmit_stores_each_version_separately_in_db(client, engine):
 
 
 def test_first_upload_enqueues_only_self_pair(client, mock_queue):
+    from web.main import DEFAULT_PYTHON_VERSION
     upload(client, "Solo")
     assert len(mock_queue.messages) == 1
     job = mock_queue.messages[0]
     assert job.bot_x_id == job.bot_o_id  # self-pair
-    assert job.python_version == "3"
+    assert job.python_version == DEFAULT_PYTHON_VERSION
 
 
 def test_second_upload_enqueues_three_jobs(client, mock_queue):

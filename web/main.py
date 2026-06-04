@@ -68,7 +68,19 @@ def extract_bot_name(source: str) -> str | None:
 
 
 _VERSIONED_RE = re.compile(r"^(.+)V\d+$")
-_PYTHON_VERSION_RE = re.compile(r"^\d+(\.\d+)?$")
+
+# Python versions we accept on upload. The fleet of turn workers is sized
+# to this set — adding a new version means adding a worker for it. When the
+# `python:` field is omitted from a bot's docstring, the latest version
+# in this tuple is used.
+SUPPORTED_PYTHON_VERSIONS: tuple[str, ...] = (
+    "3.10",
+    "3.11",
+    "3.12",
+    "3.13",
+    "3.14",
+)
+DEFAULT_PYTHON_VERSION = SUPPORTED_PYTHON_VERSIONS[-1]
 
 
 def extract_python_version(source: str) -> str | None:
@@ -92,12 +104,11 @@ def extract_python_version(source: str) -> str | None:
         stripped = line.strip()
         if stripped.lower().startswith("python:"):
             version = stripped[7:].strip()
-            if version and _PYTHON_VERSION_RE.match(version):
+            if version in SUPPORTED_PYTHON_VERSIONS:
                 return version
-            elif version:
-                return None  # present but invalid
+            return None  # present but not supported
 
-    return "3"
+    return DEFAULT_PYTHON_VERSION
 
 
 def implied_base(name: str) -> str | None:
