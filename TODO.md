@@ -45,6 +45,20 @@ These weren't separate line items in the original plan but are prerequisites the
 - [x] **Alembic-managed schema** — `schema.sql` is gone; `db/models/` + `alembic/versions/` own the schema. Server defaults use `CURRENT_TIMESTAMP` for portability.
 - [x] **Test coverage backstop** — 100% line coverage on `web/`, `db/`, and `runner/` with the `sys.monitoring` tracer.
 
+## Highest priority — up next
+
+Apply the same shape the `web/` package got (thin entrypoints, logic split into purpose-built modules) to the rest of the codebase. Each module ends up doing one thing; testable bits are pulled out of any `__main__`-style wiring.
+
+- [ ] **Refactor the runner code.** `runner/orchestrator.py` mixes AMQP plumbing, the game loop, DB persistence, and signal handling in one ~150-line file — pull each concern into its own module so the entrypoint becomes a short "glue these pieces together" file. Apply the same pattern to `runner/turn_worker.py` for consistency, even though it's smaller.
+- [ ] **Refactor the messaging code.** `messaging/__init__.py` couples a mutable module-level singleton (`_queue`) with import-time side effects; `rabbitmq.py` and `rpc.py` overlap on connection lifecycle. Split so connection setup / publish helpers / RPC client are each one file, with the singleton injected (or replaced with a context-manager pattern) rather than a global.
+- [ ] **Refactor the DB code.** `db/database.py` is a grab bag of session setup + every query in the app (selects + the multi-CTE leaderboard `text(...)` block + insert helpers + `record_match`). Split into `db/session.py` (engine/session plumbing), `db/queries/<topic>.py` (one module per domain — bots, matches, moves, leaderboard) so a reader can find "where do leaderboard queries live" without scrolling 250 lines.
+- [ ] **Replace raw SQL with SQLAlchemy expressions.** Every `text("...")` block that references model-defined columns or tables becomes a Core/ORM expression, so column references type-check against `db/models/` (today raw SQL is invisible to `ty` — rename `Bot.versioned_name` and the SQLAlchemy code fails at type-check time but the `text(...)` blocks silently keep referencing the old name and only fail at run time, with a generic Postgres error). Scope:
+  - **`db/database.py`** — convert `_LEADERBOARD_SQL` (lines 137–199) and `_BOT_FAMILY_SQL` (lines 207–~234) using CTEs (`select(...).cte(...)`) + correlated scalar subqueries (`.scalar_subquery().correlate(...)`).
+  - **`scripts/seed_example_bots.py`** — the SELECT / DELETE / INSERT statements all reference model tables and columns; convert to ORM.
+  - **`tests/`** — every `text(...)` that names a model table or column gets converted (covers `tests/conftest.py`'s insert helpers, all the `SELECT ... FROM bots/matches/moves` assertion queries in `tests/test_*.py`, the `UPDATE bots SET source = ...` in `tests/test_orchestrator.py`, etc.).
+  - **Out of scope** — pure DDL/admin without model column refs is fine to leave as `text()`: `TRUNCATE bots, matches, moves`, `DROP TABLE IF EXISTS alembic_version`, `CREATE DATABASE`, `SELECT 1 FROM pg_database`, server-default expressions in Alembic migrations like `sa.text("CURRENT_TIMESTAMP")`.
+  - **Policy going forward** — `text()` with a model column or table name in it is a code smell. If you reach for it, justify it in the same change or refactor.
+
 ## Migration steps
 
 ### Phase 1 — Local refactors (no Azure required)
