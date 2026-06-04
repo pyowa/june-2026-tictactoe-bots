@@ -30,5 +30,84 @@ services:
       timeout: 5s
       retries: 20
 
+  web:
+    build:
+      context: .
+      target: web
+      args:
+        PY_VERSION: "3.13"
+    container_name: ttt-web
+    environment:
+      DATABASE_URL: postgresql+asyncpg://ttt:ttt@db:5432/ttt
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ./web:/app/web
+      - ./runner:/app/runner
+      - ./db:/app/db
+      - ./messaging:/app/messaging
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/ || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  orchestrator:
+    build:
+      context: .
+      target: orchestrator
+      args:
+        PY_VERSION: "3.13"
+    container_name: ttt-orchestrator
+    environment:
+      DATABASE_URL: postgresql+asyncpg://ttt:ttt@db:5432/ttt
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ./web:/app/web
+      - ./runner:/app/runner
+      - ./db:/app/db
+      - ./messaging:/app/messaging
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+
+  worker:
+    build:
+      context: .
+      target: worker
+      args:
+        PY_VERSION: "3.13"
+    container_name: ttt-worker
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      # The image is python:3.13-slim, but until the multi-Python worker
+      # fleet (next TODO bullet) lands, this single worker also handles
+      # the default version that bots inherit when their docstring omits
+      # `python:` — currently 3.14. Bots that don't depend on 3.14-only
+      # syntax run fine on the actual 3.13 interpreter inside.
+      WORKER_PYTHON_VERSION: "3.14"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ./web:/app/web
+      - ./runner:/app/runner
+      - ./db:/app/db
+      - ./messaging:/app/messaging
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+
 volumes:
   ttt-pgdata:

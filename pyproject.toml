@@ -34,25 +34,15 @@ dev = [
 dev          = "uvicorn web.main:app --reload"
 test         = "pytest"
 lint         = "ruff check ."
-lint-md      = "pymarkdown scan README.md TODO.md"
+lint-md      = "pymarkdown scan README.md TODO.md CLAUDE.md"
 format       = "ruff format ."
 typecheck    = "ty check web/ db/ runner/ messaging/"
-orchestrator = "python runner/orchestrator.py"
-worker       = "python runner/turn_worker.py"
 seed-examples = "python scripts/seed_example_bots.py"
 migrate      = "alembic upgrade head"
 reset-db     = "python scripts/reset_db.py"
-db-up        = "docker compose up -d"
-db-down      = "docker compose down"
-
-[tool.poe.tasks.start]
-shell = """
-trap 'kill 0' EXIT
-uvicorn web.main:app --reload &
-WORKER_PYTHON_VERSION=3 python runner/turn_worker.py &
-python runner/orchestrator.py &
-wait
-"""
+start        = "docker compose up"
+up           = "docker compose up -d"
+down         = "docker compose down"
 
 [tool.poe.tasks.check]
 sequence = ["lint", "lint-md", "typecheck", "test"]

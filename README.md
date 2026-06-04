@@ -92,11 +92,11 @@ git clone <repo>
 cd tic-tac-toe-event
 uv sync --group dev
 
-uv run poe db-up        # start Postgres + RabbitMQ in containers
-uv run poe migrate      # create the schema
+uv run poe up           # build + start the whole stack (db, rabbitmq, web, orchestrator, worker)
+uv run poe migrate      # apply the schema against the running Postgres
 ```
 
-Defaults: Postgres at `postgresql+asyncpg://ttt:ttt@localhost:5432/ttt`, RabbitMQ at `amqp://guest:guest@localhost:5672/`. Override via `DATABASE_URL` / `RABBITMQ_URL`.
+Defaults: Postgres at `postgresql+asyncpg://ttt:ttt@localhost:5432/ttt`, RabbitMQ at `amqp://guest:guest@localhost:5672/`. Inside containers the services talk via service names (`db`, `rabbitmq`); on the host (where `poe migrate` runs) they're at `localhost`. Override via `DATABASE_URL` / `RABBITMQ_URL`.
 
 ### Start
 
@@ -104,7 +104,9 @@ Defaults: Postgres at `postgresql+asyncpg://ttt:ttt@localhost:5432/ttt`, RabbitM
 uv run poe start
 ```
 
-This launches the web server, the match orchestrator, and a py3 turn-worker — all in the foreground. Open `http://localhost:8000`. Ctrl+C stops them. `uv run poe db-down` stops Postgres + RabbitMQ. RabbitMQ's management UI is at `http://localhost:15672` (`guest`/`guest`).
+`poe start` is `docker compose up` in the foreground — web, orchestrator, worker, Postgres, and RabbitMQ all come up together. Open `http://localhost:8000`. Ctrl+C stops them. `uv run poe down` stops everything in the background-detached case. RabbitMQ's management UI is at `http://localhost:15672` (`guest`/`guest`).
+
+Source code is bind-mounted into the containers, so editing files under `web/`, `runner/`, `db/`, or `messaging/` is picked up immediately by the web server's `--reload`. The orchestrator and worker don't auto-reload — restart them with `docker compose restart orchestrator worker` after editing their code. Only `pyproject.toml` / `uv.lock` changes require a `docker compose build`.
 
 ---
 
@@ -112,7 +114,7 @@ This launches the web server, the match orchestrator, and a py3 turn-worker — 
 
 ### Local architecture
 
-`poe start` launches three host processes (web, orchestrator, py3 worker); `docker compose up -d` runs Postgres and RabbitMQ. The browser talks to the web; everything else talks via Postgres + RabbitMQ.
+Everything runs in Docker Compose: `db` (Postgres), `rabbitmq`, `web`, `orchestrator`, and `worker`. The browser talks to the web; everything else talks via Postgres + RabbitMQ. Services find each other by service name (`db`, `rabbitmq`) over the compose network. Externally only the broker ports, the DB port, and `http://localhost:8000` are exposed.
 
 #### 1. Uploading a bot
 
@@ -178,7 +180,7 @@ sequenceDiagram
     Orch->>RMQ: ack matches.todo message
 ```
 
-The web app and the runner processes all run natively on the host today; only Postgres and RabbitMQ live in containers. The orchestrator is Python-version-agnostic; each turn worker is bound to one Python version (currently just `py3`). Adding more versions = adding more workers consuming their own `turn.pyX.Y.requests` queue.
+Web, orchestrator, and worker all run as compose services alongside Postgres and RabbitMQ — built from a single multi-stage `Dockerfile` with three targets (`web`, `orchestrator`, `worker`). The orchestrator is Python-version-agnostic; each turn worker is bound to one Python version (currently just `py3.13`). Adding more versions = adding more worker services consuming their own `turn.pyX.Y.requests` queue.
 
 ### Project layout
 
@@ -193,19 +195,17 @@ tic-tac-toe-event/
 └── tests/          # Test suite
 ```
 
-Stack: FastAPI · SQLAlchemy 2.x (async, `asyncpg`) on Postgres · RabbitMQ (`aio-pika`) for match queueing + per-turn RPC · Alembic for migrations · Docker Compose for Postgres + RabbitMQ. Tests use a recording in-memory queue and an isolated `ttt_test` database on the running Postgres.
+Stack: FastAPI · SQLAlchemy 2.x (async, `asyncpg`) on Postgres · RabbitMQ (`aio-pika`) for match queueing + per-turn RPC · Alembic for migrations · Docker Compose for the entire stack (Postgres, RabbitMQ, web, orchestrator, worker) — web/orchestrator/worker built from a single multi-stage `Dockerfile`. Tests use a recording in-memory queue and an isolated `ttt_test` database on the running Postgres.
 
 ### Common tasks
 
 | Command | Description |
 |---|---|
-| `uv run poe start` | Web + orchestrator + py3 worker, all in foreground (Ctrl+C stops them) |
-| `uv run poe dev` | Web server only, with auto-reload |
-| `uv run poe orchestrator` | Match orchestrator only (consumes `matches.todo`, drives RPC game loop) |
-| `uv run poe worker` | Single turn-worker on `turn.pyX.requests` (`WORKER_PYTHON_VERSION` env var, default `3`) |
-| `uv run poe db-up` | Start the Postgres + RabbitMQ containers (`docker compose up -d`) |
-| `uv run poe db-down` | Stop the compose services |
-| `uv run poe migrate` | Apply pending Alembic migrations |
+| `uv run poe start` | Whole stack in the foreground via `docker compose up` (Ctrl+C stops it) |
+| `uv run poe up` | Whole stack detached (`docker compose up -d`) |
+| `uv run poe down` | Stop every compose service |
+| `uv run poe dev` | Host-only web server with auto-reload (bring up `db` and `rabbitmq` yourself with `docker compose up -d db rabbitmq` first) |
+| `uv run poe migrate` | Apply pending Alembic migrations (run from the host against `localhost:5432`) |
 | `uv run poe reset-db` | Drop & recreate the DB **and** purge every RabbitMQ queue (so no stale match jobs linger from the previous DB) |
 | `uv run poe seed-examples` | Wipe bots/matches/moves, insert every file under `example_bots/` as a bot (multiple files sharing a `name:` auto-version), then enqueue every bot pair on `matches.todo` |
 | `uv run poe test` | Run the test suite with coverage |
@@ -213,7 +213,7 @@ Stack: FastAPI · SQLAlchemy 2.x (async, `asyncpg`) on Postgres · RabbitMQ (`ai
 | `uv run poe lint-md` | Lint Markdown files with pymarkdown |
 | `uv run poe format` | Auto-format with ruff |
 | `uv run poe typecheck` | Type-check with ty |
-| `uv run poe check` | Run lint + typecheck + test in sequence |
+| `uv run poe check` | Run lint + lint-md + typecheck + test in sequence |
 
 ### Changing the schema
 

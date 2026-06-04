@@ -60,8 +60,16 @@ These weren't separate line items in the original plan but are prerequisites the
 - **Move from polling to event-driven (RPC-over-queue)** — done in slices:
   - [x] **Broker + queue abstraction.** RabbitMQ in `docker-compose.yml`. Thin `Queue` interface with a RabbitMQ implementation. Web enqueues a `MatchJob(bot_x_id, bot_o_id, python_version)` per unplayed pair on bot submission.
   - [x] **Orchestrator + turn workers.** `runner/orchestrator.py` consumes `matches.todo`, fetches bot sources from Postgres, drives the per-turn RPC loop, persists results. `runner/turn_worker.py` consumes its per-version queue, runs the bot source as a subprocess, replies. Polling runner retired.
-  - [ ] **Multi-Python worker fleet in compose.** Today we run one worker (py3) on the host. Promote to compose with one service per supported Python version (`matcher-py311`, `matcher-py312`, ...), all built from a shared `Dockerfile.worker` with a `PY_VERSION` build arg.
-- [ ] **Dockerfiles for web, orchestrator, and the worker base image** — multi-stage builds with `uv` for fast installs.
+  - [ ] **Multi-Python worker fleet in compose.** Today the compose stack runs a single py3.13 worker. The `Dockerfile` already takes a `PY_VERSION` build arg, so this step is just adding more `worker-pyX.Y` services in `docker-compose.yml` and routing matches to the right `turn.pyX.Y.requests` queue.
+- [x] **Dockerfiles for web, orchestrator, and the worker base image** — single multi-stage `Dockerfile` with `web`, `orchestrator`, and `worker` build targets sharing a `uv`-installed base.
+- [ ] **Structured logging + cross-service traceability.** The system has too many moving pieces (web → broker → orchestrator → worker → broker → orchestrator → DB) for ad-hoc `print` statements to be debuggable. Every log line must carry the IDs that let us reconstruct what happened to a given match or bot:
+  - **Match correlation ID** — generated at enqueue time in the web (UUID), carried on the `MatchJob` payload, threaded through every orchestrator + worker log line for that match, and persisted to the `matches` row (new column, e.g. `correlation_id`). The DB's auto-increment `matches.id` is fine for human reference but it's only known *after* the row is written — we need an ID that exists from "the moment this match was scheduled" so the enqueue, the consume, the turn-by-turn RPCs, and the final write are all joinable.
+  - **Bot IDs** — already on every row, just need to consistently appear as structured fields (`bot_x_id`, `bot_o_id`) in every log line for the match.
+  - **Per-turn detail** — each turn logs at least: `match_id`, `move_number`, `symbol`, the publishing side, the consuming side (worker), the subprocess outcome (success / timeout / runtime error), and the validation result. A reader should be able to grep one `match_id` and see all 9 (or fewer) turns in order across the orchestrator and worker logs.
+  - **JSON-structured output** so the logs are parseable by App Insights / `jq` / `grep -E` without ambiguity. Suggested library: `structlog` (simple, async-friendly, plays well with OpenTelemetry context propagation).
+  - **Bot-centric views** must be derivable from the same data: given a `bot_id`, all `match_id`s it appeared in (as X or O), and all moves it made.
+  - Web's submission endpoint also logs upload events (`bot_name`, new `bot_id`, declared `python_version`, number of MatchJobs enqueued) — that's the first link in the trace chain.
+  - Once this lands, the Phase 3 App Insights work becomes a pure plumbing exercise (configure the OTel exporter; the application logs already have the right shape).
 
 ### Phase 2 — Azure provisioning (portal/CLI, not IaC yet)
 

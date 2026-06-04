@@ -1,0 +1,30 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Tooling caches
+.ruff_cache/
+.uv/
+.mypy_cache/
+.ty_cache/
+
+# VCS / IDE / agent
+.git/
+.gitignore
+.claude/
+
+# Uploaded bots / DB artifacts
+bots/
+*.db
+
+# Misc
+*.md
+TODO.md
