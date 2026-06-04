@@ -46,6 +46,7 @@ When your change touches any of the below, update the docs **in the same change*
 - If your task involves `docker compose up` (foreground or detached), end the task with `docker compose down` from the same directory you started it in. Leaving containers running on the host's Docker daemon collides with anything else using the same image/container names and forces the user to clean up by hand.
 - If you need persistent state across multiple test cycles, use `docker compose down` between cycles too — it's cheap (~3 seconds) and removes the "did I leave anything dirty" question entirely.
 - The compose file no longer pins `container_name:` on any service, so each compose project (parent checkout, agent worktree, etc.) gets its own auto-generated container names. That means parallel runs are safe *as long as* you clean up your own containers when finished. Don't rely on the host's name-collision detection to flag misuse.
+- **If you change `Dockerfile`, `pyproject.toml`, `uv.lock`, or anything else baked into an image** (`CMD`, `ENV`, `EXPOSE`, `COPY`, `RUN`), `docker compose up -d` alone is not enough — it'll keep using the cached image and your change won't take effect at runtime. You need `docker compose up -d --build` (or `docker compose build` first). Source code under bind mounts (`web/`, `runner/`, `db/`, `messaging/`, `alembic/`) IS picked up live without a rebuild — that's the only thing that is.
 
 ## When you hit something unexpected
 
