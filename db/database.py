@@ -285,9 +285,22 @@ async def list_matches(
     return list(result.all())
 
 
-async def get_match(session: AsyncSession, match_id: int) -> Row[Any] | None:
-    stmt, _, _ = _match_select()
+async def get_match(
+    session: AsyncSession,
+    match_id: int,
+    bot_base_name: str | None = None,
+) -> Row[Any] | None:
+    """Fetch one match by id. If `bot_base_name` is provided, the match must
+    involve that bot family on either side — otherwise returns None (the
+    caller turns this into a 404). Used by the nested
+    `/bots/<name>/matches/<id>` route so a wrong bot/match combination
+    doesn't return a misleading page."""
+    stmt, bx, bo = _match_select()
     stmt = stmt.where(Match.id == match_id)
+    if bot_base_name is not None:
+        stmt = stmt.where(
+            or_(bx.c.base_name == bot_base_name, bo.c.base_name == bot_base_name)
+        )
     result = await session.execute(stmt)
     return result.first()
 

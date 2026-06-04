@@ -422,13 +422,71 @@ def test_match_detail_no_moves_shows_empty_state(client, engine):
     assert "No moves recorded" in resp.text
 
 
-def test_match_detail_back_link_present(client, engine):
+def test_match_detail_back_link_to_matches(client, engine):
     a = db_insert_bot(engine, "BotA")
     b = db_insert_bot(engine, "BotB")
     match_id = db_insert_match(engine, a, b, winner_id=None, result="cat")
 
     resp = client.get(f"/matches/{match_id}")
-    assert "/matches" in resp.text
+    assert 'href="/matches"' in resp.text
+    assert "Back to matches" in resp.text
+
+
+# ---------------------------------------------------------------------------
+# Match detail nested under a bot (/bots/{base_name}/matches/{match_id})
+# ---------------------------------------------------------------------------
+
+
+def test_bot_match_detail_returns_200_when_bot_is_x(client, engine):
+    a = db_insert_bot(engine, "BotA")
+    b = db_insert_bot(engine, "BotB")
+    match_id = db_insert_match(engine, a, b, winner_id=a, result="x_wins")
+
+    resp = client.get(f"/bots/BotA/matches/{match_id}")
+    assert resp.status_code == 200
+
+
+def test_bot_match_detail_returns_200_when_bot_is_o(client, engine):
+    a = db_insert_bot(engine, "BotA")
+    b = db_insert_bot(engine, "BotB")
+    match_id = db_insert_match(engine, a, b, winner_id=b, result="o_wins")
+
+    resp = client.get(f"/bots/BotB/matches/{match_id}")
+    assert resp.status_code == 200
+
+
+def test_bot_match_detail_404_for_match_not_involving_bot(client, engine):
+    db_insert_bot(engine, "BotA")
+    b = db_insert_bot(engine, "BotB")
+    c = db_insert_bot(engine, "BotC")
+    match_id = db_insert_match(engine, b, c, winner_id=b, result="x_wins")
+
+    resp = client.get(f"/bots/BotA/matches/{match_id}")
+    assert resp.status_code == 404
+
+
+def test_bot_match_detail_404_for_unknown_match(client):
+    resp = client.get("/bots/BotA/matches/99999")
+    assert resp.status_code == 404
+
+
+def test_bot_match_detail_back_link_to_bot(client, engine):
+    a = db_insert_bot(engine, "BotA")
+    b = db_insert_bot(engine, "BotB")
+    match_id = db_insert_match(engine, a, b, winner_id=None, result="cat")
+
+    resp = client.get(f"/bots/BotA/matches/{match_id}")
+    assert 'href="/bots/BotA"' in resp.text
+    assert "Back to BotA" in resp.text
+
+
+def test_bot_detail_links_to_nested_match_url(client, engine):
+    a = db_insert_bot(engine, "BotA")
+    b = db_insert_bot(engine, "BotB")
+    match_id = db_insert_match(engine, a, b, winner_id=a, result="x_wins")
+
+    resp = client.get("/bots/BotA")
+    assert f'/bots/BotA/matches/{match_id}' in resp.text
 
 
 # ---------------------------------------------------------------------------

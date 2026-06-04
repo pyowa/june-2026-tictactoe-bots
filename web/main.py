@@ -100,11 +100,37 @@ async def bot_family(request: Request, base_name: str) -> HTMLResponse:
 
 @app.get("/matches/{match_id}", response_class=HTMLResponse)
 async def match_detail(request: Request, match_id: int) -> HTMLResponse:
+    return await _render_match(request, match_id, "/matches", "Back to matches")
+
+
+@app.get("/bots/{base_name}/matches/{match_id}", response_class=HTMLResponse)
+async def bot_match_detail(
+    request: Request, base_name: str, match_id: int
+) -> HTMLResponse:
+    return await _render_match(
+        request, match_id, f"/bots/{base_name}", f"Back to {base_name}", base_name
+    )
+
+
+async def _render_match(
+    request: Request,
+    match_id: int,
+    back_url: str,
+    back_label: str,
+    bot_base_name: str | None = None,
+) -> HTMLResponse:
     async with get_session() as session:
-        match = await get_match(session, match_id)
+        match = await get_match(session, match_id, bot_base_name=bot_base_name)
         if match is None:
             return not_found(request)
         moves = await get_moves(session, match_id)
     return templates.TemplateResponse(
-        request, "match_detail.html", {"match": match, "moves": moves}
+        request,
+        "match_detail.html",
+        {
+            "match": match,
+            "moves": moves,
+            "back_url": back_url,
+            "back_label": back_label,
+        },
     )
