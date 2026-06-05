@@ -1,4 +1,7 @@
 from types import SimpleNamespace
+from typing import cast
+
+from fastapi import Request
 
 from web.dependencies import get_queue
 
@@ -11,4 +14,4 @@ def test_get_queue_reads_from_app_state() -> None:
     state = SimpleNamespace(queue=sentinel)
     request = SimpleNamespace(app=SimpleNamespace(state=state))
 
-    assert get_queue(request) is sentinel  # type: ignore[arg-type]
+    assert get_queue(cast(Request, request)) is sentinel

@@ -198,6 +198,7 @@ def _bound_db(engine: Engine) -> None:
 def _set_source(engine: Engine, bot_id: int, source: bytes) -> None:
     with Session(engine) as session, session.begin():
         bot = session.get(Bot, bot_id)
+        assert bot is not None, f"no Bot row with id={bot_id}"
         bot.source = source
 
 

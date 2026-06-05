@@ -35,7 +35,7 @@ test         = "pytest"
 lint         = "ruff check ."
 lint-md      = "pymarkdown scan README.md TODO.md CLAUDE.md"
 format       = "ruff format ."
-typecheck    = "ty check web/ db/ runner/ messaging/"
+typecheck    = "ty check web/ db/ runner/ messaging/ scripts/ tests/"
 seed-examples = "python -m scripts.seed_example_bots"
 reset-db     = "python -m scripts.reset_db"
 

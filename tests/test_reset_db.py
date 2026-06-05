@@ -2,6 +2,7 @@ import io
 import json
 import urllib.error
 from collections.abc import Iterator
+from email.message import Message
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -53,7 +54,7 @@ def _http_error(code: int) -> urllib.error.HTTPError:
         url="http://localhost:15672/api/queues/foo/contents",
         code=code,
         msg="boom",
-        hdrs=None,  # type: ignore[arg-type]
+        hdrs=Message(),
         fp=io.BytesIO(b""),
     )
 

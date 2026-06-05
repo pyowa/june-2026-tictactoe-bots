@@ -11,9 +11,13 @@ import asyncio
 import secrets
 from pathlib import Path
 
-from sqlalchemy import Engine, text
+from sqlalchemy import Engine, delete, func, select
+from sqlalchemy.orm import Session
 
 from db.database import create_sync_engine
+from db.models.bot import Bot
+from db.models.match import Match
+from db.models.move import Move
 from messaging.client import make_queue
 from messaging.queue import MatchJob, Queue
 from messaging.routing import pick_python_version
@@ -26,16 +30,14 @@ EXAMPLE_BOTS_DIR = ROOT / "example_bots"
 async def enqueue_all_pairs(engine: Engine, queue: Queue) -> int:
     """Enqueue one MatchJob per ordered pair (including self-pairs) so the
     orchestrator gets the full Cartesian product to work through."""
-    with engine.connect() as conn:
-        rows = conn.execute(
-            text("SELECT id, python_version FROM bots ORDER BY id")
-        ).fetchall()
+    with Session(engine) as session:
+        bots = session.scalars(select(Bot).order_by(Bot.id)).all()
 
     count = 0
-    for x_id, x_py in rows:
-        for o_id, o_py in rows:
-            py = pick_python_version(x_py, o_py)
-            await queue.enqueue_match(MatchJob(x_id, o_id, py))
+    for x in bots:
+        for o in bots:
+            py = pick_python_version(x.python_version, o.python_version)
+            await queue.enqueue_match(MatchJob(x.id, o.id, py))
             count += 1
     return count
 
@@ -43,11 +45,11 @@ async def enqueue_all_pairs(engine: Engine, queue: Queue) -> int:
 def main() -> None:
     engine = create_sync_engine()
 
-    with engine.begin() as conn:
+    with Session(engine) as session, session.begin():
         print("Clearing existing bots, matches, and moves...")
-        conn.execute(text("DELETE FROM moves"))
-        conn.execute(text("DELETE FROM matches"))
-        conn.execute(text("DELETE FROM bots"))
+        session.execute(delete(Move))
+        session.execute(delete(Match))
+        session.execute(delete(Bot))
 
     sources = sorted(EXAMPLE_BOTS_DIR.glob("*.py"))
     if not sources:
@@ -55,7 +57,7 @@ def main() -> None:
         return
 
     inserted = 0
-    with engine.begin() as conn:
+    with Session(engine) as session, session.begin():
         for src in sources:
             source_bytes = src.read_bytes()
             source_text = source_bytes.decode("utf-8", errors="replace")
@@ -69,28 +71,21 @@ def main() -> None:
             # Multiple files can share a `name:` (e.g. perfect_bot_v1.py and
             # perfect_bot_v2.py both say "Perfect Bot"). Auto-version them
             # the same way the web upload flow does.
-            current_max = conn.execute(
-                text("SELECT MAX(version) FROM bots WHERE base_name = :n"),
-                {"n": bot_name},
+            current_max = session.execute(
+                select(func.max(Bot.version)).where(Bot.base_name == bot_name)
             ).scalar() or 0
             version = current_max + 1
             v_name = versioned_name(bot_name, version)
 
-            conn.execute(
-                text(
-                    """INSERT INTO bots
-                       (base_name, versioned_name, version,
-                        owner_token, python_version, source)
-                       VALUES (:b, :v, :ver, :t, :py, :src)"""
-                ),
-                {
-                    "b": bot_name,
-                    "v": v_name,
-                    "ver": version,
-                    "t": secrets.token_hex(32),
-                    "py": python_version,
-                    "src": source_bytes,
-                },
+            session.add(
+                Bot(
+                    base_name=bot_name,
+                    versioned_name=v_name,
+                    version=version,
+                    owner_token=secrets.token_hex(32),
+                    python_version=python_version,
+                    source=source_bytes,
+                )
             )
             inserted += 1
             print(f"  {src.name:30s} -> {v_name}")
