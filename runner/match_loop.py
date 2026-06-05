@@ -7,7 +7,7 @@ Takes any `RpcCaller`, so it's broker-agnostic and fully unit-testable.
 import base64
 import json
 import os
-from typing import Any, Protocol
+from typing import Protocol
 
 from messaging.routing import turn_queue_for
 from runner.engine import (
@@ -30,8 +30,61 @@ class RpcCaller(Protocol):
     ) -> bytes: ...
 
 
+class _BotForfeit(Exception):
+    """Raised by `_request_turn` to short-circuit a turn the bot blew.
+    Never escapes this module — `play_match_rpc` catches it and records the
+    `error` message on the resulting Move row."""
+
+    def __init__(self, error: str) -> None:
+        super().__init__(error)
+        self.error = error
+
+
 def _forfeit_label(player: str) -> str:
     return "x_forfeit" if player == "x" else "o_forfeit"
+
+
+async def _request_turn(
+    rpc: RpcCaller,
+    queue_name: str,
+    timeout: float,
+    symbol: str,
+    board: Board,
+    source: bytes,
+) -> Board:
+    """One turn round-trip: send the request, validate the reply, return
+    the new board. Raises `_BotForfeit` on timeout, worker-reported error,
+    missing board, unparseable board, or rule-violating move."""
+    payload = json.dumps(
+        {
+            "symbol": symbol,
+            "board": board_to_str(board),
+            "source_b64": base64.b64encode(source).decode("ascii"),
+        }
+    ).encode()
+
+    try:
+        response_bytes = await rpc.call(queue_name, payload, timeout=timeout)
+    except TimeoutError:
+        raise _BotForfeit(f"timeout after {timeout}s") from None
+
+    response = json.loads(response_bytes)
+    error = response.get("error")
+    new_board_text = response.get("board")
+    if error or not new_board_text:
+        raise _BotForfeit(error or "no output")
+
+    new_board = parse_board(new_board_text)
+    if new_board is None:
+        raise _BotForfeit(
+            f"invalid output: unparseable board: {new_board_text!r}"
+        )
+
+    move_error = validate_move(board, new_board, symbol)
+    if move_error:
+        raise _BotForfeit(move_error)
+
+    return new_board
 
 
 async def play_match_rpc(
@@ -45,57 +98,26 @@ async def play_match_rpc(
     board: Board = [row[:] for row in EMPTY_BOARD]
     moves: list[Move] = []
     queue_name = turn_queue_for(python_version)
-    sources = (bot_x_source, bot_o_source)
+    turns = (
+        ("x", "X", bot_x_source),
+        ("o", "O", bot_o_source),
+    )
     move_number = 0
 
     while True:
-        for idx, (player, symbol) in enumerate((("x", "X"), ("o", "O"))):
+        for player, symbol, source in turns:
             move_number += 1
-            payload = json.dumps(
-                {
-                    "symbol": symbol,
-                    "board": board_to_str(board),
-                    "source_b64": base64.b64encode(sources[idx]).decode("ascii"),
-                }
-            ).encode()
-
             try:
-                response_bytes = await rpc.call(queue_name, payload, timeout=timeout)
-            except TimeoutError:
+                board = await _request_turn(
+                    rpc, queue_name, timeout, symbol, board, source
+                )
+            except _BotForfeit as forfeit:
                 moves.append(
-                    Move(move_number, player, board_to_str(board),
-                         f"timeout after {timeout}s")
+                    Move(move_number, player, board_to_str(board), forfeit.error)
                 )
                 return MatchResult(_forfeit_label(player), moves)
 
-            response: dict[str, Any] = json.loads(response_bytes)
-            error = response.get("error")
-            new_board_text = response.get("board")
-
-            if error or not new_board_text:
-                moves.append(
-                    Move(move_number, player, board_to_str(board), error or "no output")
-                )
-                return MatchResult(_forfeit_label(player), moves)
-
-            new_board = parse_board(new_board_text)
-            if new_board is None:
-                moves.append(
-                    Move(move_number, player, board_to_str(board),
-                         f"invalid output: unparseable board: {new_board_text!r}")
-                )
-                return MatchResult(_forfeit_label(player), moves)
-
-            move_error = validate_move(board, new_board, symbol)
-            if move_error:
-                moves.append(
-                    Move(move_number, player, board_to_str(board), move_error)
-                )
-                return MatchResult(_forfeit_label(player), moves)
-
-            board = new_board
             moves.append(Move(move_number, player, board_to_str(board)))
-
             outcome = check_winner(board)
             if outcome:
                 return MatchResult(outcome, moves)
