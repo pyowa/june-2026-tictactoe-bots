@@ -189,12 +189,15 @@ Web, orchestrator, and the worker fleet all run as compose services alongside Po
 tic-tac-toe-event/
 ├── web/            # FastAPI app (submission UI, leaderboard, matches)
 ├── runner/         # orchestrator.py + turn_worker.py (broker entrypoints) · dispatch.py (per-match handling) · match_loop.py (per-turn RPC loop) · bot_subprocess.py (bot tmpfile + subprocess) · engine.py (pure board logic)
-├── db/             # SQLAlchemy models, async query helpers, bot source stored in `bots.source` BYTEA
+├── entities/       # Per-entity packages — each has model.py (ORM columns) + repository.py (every query that returns rows of that shape). bot/, match/, move/.
+├── db/             # base.py (DeclarativeBase) + session.py (async engine, session factory, get_session helper). No queries live here.
 ├── messaging/      # Queue + RPC abstraction; RabbitMQ implementation
 ├── example_bots/   # Reference bots; `poe seed-examples` loads these into the DB
 ├── alembic/        # Migration scripts (versions/)
 └── tests/          # Test suite
 ```
+
+Database access uses **per-entity repositories**: a `BotRepository(session)`, `MatchRepository(session)`, or `MoveRepository(session)` co-locates every query that returns rows shaped like that entity. Cross-entity queries (the leaderboard joins bots + matches; it returns Bot-shaped rows, so it lives on `BotRepository`) live with the entity they project. Routes receive a repo via FastAPI `Depends(get_bots)` (defined in `web/dependencies.py`); tests substitute fakes with `app.dependency_overrides[get_bots] = lambda: ...`. Non-route callers (orchestrator, scripts) open a session with `async with get_session() as session: BotRepository(session)`.
 
 Stack: FastAPI · SQLAlchemy 2.x (async, `asyncpg`) on Postgres · RabbitMQ (`aio-pika`) for match queueing + per-turn RPC · Alembic for migrations · Docker Compose for the entire stack (Postgres, RabbitMQ, web, orchestrator, one turn worker per supported Python version) — web/orchestrator/worker built from a single multi-stage `Dockerfile`. Tests use a recording in-memory queue and an isolated `ttt_test` database on the running Postgres.
 
@@ -213,7 +216,7 @@ Stack: FastAPI · SQLAlchemy 2.x (async, `asyncpg`) on Postgres · RabbitMQ (`ai
 
 ### Changing the schema
 
-Models live in `db/models/` as SQLAlchemy ORM classes (one file per model). To change the schema:
+Models live in `entities/<name>/model.py` as SQLAlchemy ORM classes (one file per entity, alongside its `repository.py`). To change the schema:
 
 ```bash
 uv run alembic revision --autogenerate -m "describe the change"

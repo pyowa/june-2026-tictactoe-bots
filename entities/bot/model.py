@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy import func
 from sqlalchemy.orm import Mapped, mapped_column
 
-from db.models.base import Base
+from db.base import Base
 
 
 class Bot(Base):

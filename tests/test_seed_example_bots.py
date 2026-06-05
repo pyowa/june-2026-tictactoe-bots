@@ -1,21 +1,26 @@
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
-from sqlalchemy import Engine, func, select
-from sqlalchemy.orm import Session
+import pytest_asyncio
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
-import db.database as d
+import db.session as d
 import scripts.seed_example_bots as seed
-from db.models.bot import Bot
+from db.session import get_session
+from entities.bot.model import Bot
+from entities.bot.repository import BotRepository
 from scripts.seed_example_bots import enqueue_all_pairs, main
 from tests.conftest import TEST_ASYNC_URL, _RecordingQueue, db_insert_bot
 
 
-@pytest.fixture()
-def _bound_db(engine: Engine) -> None:
+@pytest_asyncio.fixture()
+async def _bound_db(engine: AsyncEngine) -> AsyncIterator[None]:
     """Bind the async DB engine to the test Postgres so seed_example_bots.main()
-    sees the test database via `get_session()` / `create_sync_engine()`."""
+    sees the test database via `get_session()`."""
     d.reconfigure(TEST_ASYNC_URL)
+    yield
 
 
 # ---------------------------------------------------------------------------
@@ -24,13 +29,14 @@ def _bound_db(engine: Engine) -> None:
 
 
 async def test_enqueue_all_pairs_emits_n_squared_jobs_with_max_python_version(
-    engine: Engine, mock_queue: _RecordingQueue
+    engine: AsyncEngine, mock_queue: _RecordingQueue, _bound_db: None
 ) -> None:
-    a = db_insert_bot(engine, "Alpha", python_version="3.11")
-    b = db_insert_bot(engine, "Beta", python_version="3.13")
-    c = db_insert_bot(engine, "Gamma", python_version="3.12")
+    a = await db_insert_bot(engine, "Alpha", python_version="3.11")
+    b = await db_insert_bot(engine, "Beta", python_version="3.13")
+    c = await db_insert_bot(engine, "Gamma", python_version="3.12")
 
-    count = await enqueue_all_pairs(engine, mock_queue)
+    async with get_session() as session:
+        count = await enqueue_all_pairs(BotRepository(session), mock_queue)
 
     assert count == 9  # 3 bots -> 3*3 ordered pairs (self-pairs included)
     assert len(mock_queue.messages) == 9
@@ -51,9 +57,10 @@ async def test_enqueue_all_pairs_emits_n_squared_jobs_with_max_python_version(
 
 
 async def test_enqueue_all_pairs_with_no_bots_emits_nothing(
-    engine: Engine, mock_queue: _RecordingQueue
+    engine: AsyncEngine, mock_queue: _RecordingQueue, _bound_db: None
 ) -> None:
-    count = await enqueue_all_pairs(engine, mock_queue)
+    async with get_session() as session:
+        count = await enqueue_all_pairs(BotRepository(session), mock_queue)
     assert count == 0
     assert mock_queue.messages == []
 
@@ -68,10 +75,10 @@ def _write_bot(dir_: Path, filename: str, docstring_body: str, extra: str = "") 
     (dir_ / filename).write_text(content)
 
 
-def test_main_inserts_bots_and_enqueues_match_jobs(
+async def test_main_inserts_bots_and_enqueues_match_jobs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    engine: Engine,
+    engine: AsyncEngine,
     mock_queue: _RecordingQueue,
     _bound_db: None,
     capsys: pytest.CaptureFixture[str],
@@ -81,17 +88,18 @@ def test_main_inserts_bots_and_enqueues_match_jobs(
     monkeypatch.setattr(seed, "EXAMPLE_BOTS_DIR", tmp_path)
     monkeypatch.setattr(seed, "make_queue", lambda: mock_queue)
 
-    main()
+    await main()
 
-    with Session(engine) as session:
-        rows = session.execute(
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        rows = (await session.execute(
             select(
                 Bot.base_name,
                 Bot.versioned_name,
                 Bot.version,
                 Bot.python_version,
             ).order_by(Bot.base_name)
-        ).all()
+        )).all()
 
     # Both bots inserted with v1 and the expected python_version.
     assert len(rows) == 2
@@ -113,10 +121,10 @@ def test_main_inserts_bots_and_enqueues_match_jobs(
     assert "enqueued 4 match jobs" in out
 
 
-def test_main_auto_versions_duplicate_names(
+async def test_main_auto_versions_duplicate_names(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    engine: Engine,
+    engine: AsyncEngine,
     mock_queue: _RecordingQueue,
     _bound_db: None,
 ) -> None:
@@ -126,21 +134,22 @@ def test_main_auto_versions_duplicate_names(
     monkeypatch.setattr(seed, "EXAMPLE_BOTS_DIR", tmp_path)
     monkeypatch.setattr(seed, "make_queue", lambda: mock_queue)
 
-    main()
+    await main()
 
-    with Session(engine) as session:
-        rows = session.execute(
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        rows = (await session.execute(
             select(Bot.versioned_name, Bot.version)
             .where(Bot.base_name == "Foo")
             .order_by(Bot.version)
-        ).all()
+        )).all()
     assert [(r[0], r[1]) for r in rows] == [("Foo", 1), ("FooV2", 2)]
 
 
-def test_main_skips_files_without_name_field(
+async def test_main_skips_files_without_name_field(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    engine: Engine,
+    engine: AsyncEngine,
     mock_queue: _RecordingQueue,
     _bound_db: None,
     capsys: pytest.CaptureFixture[str],
@@ -151,26 +160,27 @@ def test_main_skips_files_without_name_field(
     monkeypatch.setattr(seed, "EXAMPLE_BOTS_DIR", tmp_path)
     monkeypatch.setattr(seed, "make_queue", lambda: mock_queue)
 
-    main()
+    await main()
 
     out = capsys.readouterr().out
     assert "Skipping nameless.py" in out
     assert "no 'name:' field" in out
 
-    with Session(engine) as session:
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
         names = [
             r[0]
-            for r in session.execute(select(Bot.base_name)).all()
+            for r in (await session.execute(select(Bot.base_name))).all()
         ]
     assert names == ["Good"]
     # Only one bot inserted -> 1*1 = 1 match job.
     assert len(mock_queue.messages) == 1
 
 
-def test_main_falls_back_to_python_3_when_version_unsupported(
+async def test_main_falls_back_to_python_3_when_version_unsupported(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    engine: Engine,
+    engine: AsyncEngine,
     mock_queue: _RecordingQueue,
     _bound_db: None,
 ) -> None:
@@ -181,19 +191,20 @@ def test_main_falls_back_to_python_3_when_version_unsupported(
     monkeypatch.setattr(seed, "EXAMPLE_BOTS_DIR", tmp_path)
     monkeypatch.setattr(seed, "make_queue", lambda: mock_queue)
 
-    main()
+    await main()
 
-    with Session(engine) as session:
-        row = session.execute(
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        row = (await session.execute(
             select(Bot.python_version).where(Bot.base_name == "Weird")
-        ).one()
+        )).one()
     assert row[0] == "3"
 
 
-def test_main_with_empty_directory_prints_and_returns(
+async def test_main_with_empty_directory_prints_and_returns(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    engine: Engine,
+    engine: AsyncEngine,
     mock_queue: _RecordingQueue,
     _bound_db: None,
     capsys: pytest.CaptureFixture[str],
@@ -201,14 +212,15 @@ def test_main_with_empty_directory_prints_and_returns(
     monkeypatch.setattr(seed, "EXAMPLE_BOTS_DIR", tmp_path)
     monkeypatch.setattr(seed, "make_queue", lambda: mock_queue)
 
-    main()
+    await main()
 
     out = capsys.readouterr().out
     assert "No .py files found" in out
 
-    with Session(engine) as session:
-        count = session.execute(
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        count = (await session.execute(
             select(func.count()).select_from(Bot)
-        ).scalar()
+        )).scalar()
     assert count == 0
     assert mock_queue.messages == []

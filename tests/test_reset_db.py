@@ -1,34 +1,40 @@
 import io
 import json
 import urllib.error
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 from email.message import Message
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from sqlalchemy import Engine, create_engine, func, select
-from sqlalchemy.orm import Session
+import pytest_asyncio
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    async_sessionmaker,
+    create_async_engine,
+)
 
-import db.database as d
+import db.session as d
 import scripts.reset_db as reset_db
-from db.models.base import Base
+from db.base import Base
 from scripts.reset_db import main, purge_rabbitmq_queues
-from tests.conftest import TEST_ASYNC_URL, TEST_SYNC_URL
+from tests.conftest import TEST_ASYNC_URL
 
 
-@pytest.fixture()
-def _bound_db(engine: Engine) -> Iterator[None]:
-    """Bind the async DB engine to the test Postgres so create_sync_engine()
-    inside reset_db produces engines pointed at `ttt_test`. After the test,
-    re-create the schema we may have dropped so later tests still see tables."""
+@pytest_asyncio.fixture()
+async def _bound_db(engine: AsyncEngine) -> AsyncIterator[None]:
+    """Bind the async DB engine to the test Postgres so reset_db points at
+    `ttt_test`. After the test, re-create the schema we may have dropped
+    so later tests still see tables."""
     d.reconfigure(TEST_ASYNC_URL)
     yield
     # The test session-scoped fixture only creates the schema once; if main()
     # dropped the tables we must recreate them so subsequent tests have a DB.
-    eng = create_engine(TEST_SYNC_URL)
-    Base.metadata.create_all(eng)
-    eng.dispose()
+    eng = create_async_engine(TEST_ASYNC_URL)
+    async with eng.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    await eng.dispose()
 
 
 class _FakeResponse:
@@ -196,9 +202,9 @@ def test_purge_handles_timeout_error_on_get(
 # ---------------------------------------------------------------------------
 
 
-def test_main_drops_tables_runs_alembic_and_purges_queues(
+async def test_main_drops_tables_runs_alembic_and_purges_queues(
     monkeypatch: pytest.MonkeyPatch,
-    engine: Engine,
+    engine: AsyncEngine,
     _bound_db: None,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -217,18 +223,19 @@ def test_main_drops_tables_runs_alembic_and_purges_queues(
 
     monkeypatch.setattr(reset_db.urllib.request, "urlopen", fake_urlopen)
 
-    main()
+    await main()
 
     # Tables really got dropped.
-    with Session(engine) as session:
-        present = session.execute(
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        present = (await session.execute(
             select(
                 func.to_regclass("public.bots"),
                 func.to_regclass("public.matches"),
                 func.to_regclass("public.moves"),
                 func.to_regclass("public.alembic_version"),
             )
-        ).one()
+        )).one()
     assert present is not None
     assert all(v is None for v in present)
 

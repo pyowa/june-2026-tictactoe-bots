@@ -41,9 +41,9 @@ The orchestrator is Python-version-agnostic — it just drives the game loop and
 
 These weren't separate line items in the original plan but are prerequisites the upcoming Azure work depends on, and they're done:
 
-- [x] **Async ORM on Postgres** — FastAPI uses SQLAlchemy 2.x async with `asyncpg`. `aiosqlite` is removed. The runner uses a SQLAlchemy sync engine via `psycopg2`.
-- [x] **Alembic-managed schema** — `schema.sql` is gone; `db/models/` + `alembic/versions/` own the schema. Server defaults use `CURRENT_TIMESTAMP` for portability.
-- [x] **Test coverage backstop** — 100% line coverage on `web/`, `db/`, and `runner/` with the `sys.monitoring` tracer.
+- [x] **Async ORM on Postgres** — FastAPI uses SQLAlchemy 2.x async with `asyncpg`. `aiosqlite` is removed. After the DB-per-entity refactor every consumer (web, runner, scripts, tests) is async-only; the only sync DB code path left is the test conftest's admin-bootstrap (`CREATE DATABASE ttt_test` via psycopg2, listed as a dev dependency).
+- [x] **Alembic-managed schema** — `schema.sql` is gone; `entities/*/model.py` + `alembic/versions/` own the schema. Server defaults use `CURRENT_TIMESTAMP` for portability.
+- [x] **Test coverage backstop** — 100% line coverage on `web/`, `db/`, `entities/`, `runner/`, `messaging/`, and `scripts/` with the `sys.monitoring` tracer.
 
 ## Highest priority — up next
 
@@ -51,8 +51,32 @@ Apply the same shape the `web/` package got (thin entrypoints, logic split into 
 
 - [x] **Refactor the messaging code.** `messaging/__init__.py` is empty; env-var + factory live in `messaging/client.py`. Global singleton replaced with FastAPI `Depends(get_queue)` + per-app lifespan; tests substitute via `app.dependency_overrides`. `rpc.py` split into `rpc_client.py` (caller) and `rpc_server.py` (`serve_rpc` wiring). `rabbitmq.py` left as one 38-line class — splitting further into "connection" + "publish" was discussed and rejected as over-engineering for the size.
 - [x] **Refactor the runner code.** `runner/orchestrator.py` is now a thin entrypoint (`run()` + `__main__` only); the per-turn RPC loop lives in `runner/match_loop.py`, end-to-end match handling (fetch sources, drive loop, persist) lives in `runner/dispatch.py`. `runner/turn_worker.py` got the same split: thin broker entrypoint, with the bot tmpfile/subprocess invocation and RPC marshalling in `runner/bot_subprocess.py`.
-- [ ] **Refactor the DB code.** `db/database.py` is a grab bag of session setup + every query in the app (selects + the multi-CTE leaderboard `text(...)` block + insert helpers + `record_match`). Split into `db/session.py` (engine/session plumbing), `db/queries/<topic>.py` (one module per domain — bots, matches, moves, leaderboard) so a reader can find "where do leaderboard queries live" without scrolling 250 lines.
-- [x] **Replace raw SQL with SQLAlchemy expressions.** All hand-written `text("...")` blocks referencing model tables/columns are gone. `_LEADERBOARD_SQL` and `_BOT_FAMILY_SQL` in `db/database.py` are now `select(...).cte(...)` chains with `.scalar_subquery()` for the correlated COUNTs; `scripts/seed_example_bots.py` uses `session.add(Bot(...))` / `session.execute(delete(Model))` / `select(Bot)` everywhere; the conftest insert helpers and every test assertion SELECT are ORM expressions. `Bot.source` is deferred at the model level so `select(Bot)` doesn't pull BYTEA payloads. `ty` now type-checks every column reference across `web/ db/ runner/ messaging/ scripts/ tests/`. The CLAUDE.md "Database query style" section codifies the conventions. Remaining `text()` calls are all documented exceptions: `tests/conftest.py` (pg_database catalog + CREATE DATABASE + TRUNCATE), `scripts/reset_db.py` (the user-specified DDL carve-out), and Alembic migrations (`sa.text("CURRENT_TIMESTAMP")` server defaults).
+- [x] **Refactor the DB code into per-entity packages with Repository + DI, and go async-only.** Replace the current `db/database.py` grab bag and `db/models/{entity}.py` parallel tree with a domain-shaped layout that co-locates schema and queries per entity. Target layout:
+
+  ```text
+  entities/
+  ├── bot/
+  │   ├── model.py        # class Bot(Base) — columns only
+  │   └── repository.py   # class BotRepository — every query that returns Bot-shaped rows
+  ├── match/
+  │   ├── model.py
+  │   └── repository.py
+  └── move/
+      ├── model.py
+      └── repository.py
+  db/
+  ├── base.py             # DeclarativeBase (moved from db/models/base.py)
+  └── session.py          # engine + session factory + get_db_session DI dependency
+  ```
+
+  Repositories take an `AsyncSession` in their constructor; their methods are async; queries are SQLAlchemy 2.x `select(...)` expressions. Cross-entity queries (leaderboard, list-matches-for-bot) live with the entity they return (leaderboard returns Bot-shaped rows → BotRepository; list-for-bot returns Match-shaped rows → MatchRepository).
+
+  FastAPI routes get repositories via `Depends`: `get_bots(session = Depends(get_db_session)) -> BotRepository`, plus siblings for Match and Move. Tests substitute via `app.dependency_overrides[get_bots] = ...` when they want fakes; otherwise the real `BotRepository` is used end-to-end against the test DB.
+
+  **Everything goes async.** Drop `create_sync_engine`, drop the psycopg2 runtime dep. Tests, conftest helpers (`db_insert_bot/match/move` become async), and scripts (`seed_example_bots.py`, `reset_db.py`) all convert to async. The only remaining sync path is alembic's offline mode (used only for `alembic --sql` generation, not normal workflow).
+
+  Why this layout: a new contributor lands on `entities/bot/` and finds both the schema and every available operation in one place. The `db/` directory becomes just session/engine plumbing. Per CLAUDE.md "Database query style" the ORM patterns are already locked in; this refactor moves the *organization* to match the conceptual model.
+- [x] **Replace raw SQL with SQLAlchemy expressions.** All hand-written `text("...")` blocks referencing model tables/columns are gone. The leaderboard and bot-family queries now live as `select(...).cte(...)` chains with `.scalar_subquery()` for the correlated COUNTs on `BotRepository` (`entities/bot/repository.py`); `scripts/seed_example_bots.py` uses `BotRepository.create(...)` / `session.execute(delete(Model))` / `select(Bot)` everywhere; the conftest insert helpers and every test assertion SELECT are ORM expressions. `Bot.source` is deferred at the model level so `select(Bot)` doesn't pull BYTEA payloads. `ty` now type-checks every column reference across `web/ db/ entities/ runner/ messaging/ scripts/ tests/`. The CLAUDE.md "Database query style" section codifies the conventions. Remaining `text()` calls are all documented exceptions: `tests/conftest.py` (pg_database catalog + CREATE DATABASE + TRUNCATE), `scripts/reset_db.py` (the user-specified DDL carve-out for `alembic_version`), and Alembic migrations (`sa.text("CURRENT_TIMESTAMP")` server defaults).
 - [ ] **Audit test mocks.** Walk through `mocks.md` (generated catalog of every `MagicMock` / `AsyncMock` / `monkeypatch.setattr` / `app.dependency_overrides` / custom fake/stub in the test suite). For each entry decide: (a) is the mock load-bearing — i.e., would removing it force the test to hit a real broker/process/network? (b) would replacing the mock with a real implementation give us stronger coverage at acceptable cost? Goal: shrink the surface area where we're mocking *our own code* (those mocks pin the wiring, not behavior — and silently rot when the real thing changes). Keep mocks for true boundaries (AMQP channels, subprocess, urlopen). Document conclusions inline in `mocks.md` or remove that file once everything's been reviewed.
 - [ ] **Make the messaging layer broker-agnostic so RabbitMQ is one implementation, not the only one.** Today `aio_pika` leaks beyond `messaging/`: `runner/orchestrator.py` and `runner/turn_worker.py` both call `aio_pika.connect_robust(BROKER_URL)` directly; `messaging/rpc_client.py` and `messaging/rpc_server.py` accept `aio_pika.AbstractChannel` as a parameter and construct `aio_pika.Message` objects inline. A future swap to Azure Service Bus (Phase 2 of the Azure plan already names it as the production target), AWS SQS, NATS, or a simple in-memory bus for tests would require touching all four files. Target shape: every `aio_pika` import lives inside `messaging/`. Orchestrator/worker receive a broker-agnostic connection object from a `messaging.client` factory (`make_connection() -> BrokerConnection`), and the RPC client/server are typed against that abstraction. The existing `Queue` protocol is the model — extend it with connection-lifecycle and request/response primitives. Two concrete payoffs: (a) when the Azure work starts, only one new module (`messaging/servicebus.py`) is needed; (b) an in-memory implementation removes the requirement that RabbitMQ be running for `poe test`, which would speed the suite and simplify CI.
 

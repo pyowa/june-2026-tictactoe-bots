@@ -4,10 +4,10 @@ from typing import TYPE_CHECKING
 from sqlalchemy import CheckConstraint, ForeignKey, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from db.models.base import Base
+from db.base import Base
 
 if TYPE_CHECKING:
-    from db.models.move import Move
+    from entities.move.model import Move
 
 
 class Match(Base):

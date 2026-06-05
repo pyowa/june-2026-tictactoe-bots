@@ -1409,7 +1409,6 @@ dependencies = [
     { name = "fastapi" },
     { name = "greenlet" },
     { name = "jinja2" },
-    { name = "psycopg2-binary" },
     { name = "python-multipart" },
     { name = "sqlalchemy" },
     { name = "uvicorn", extra = ["standard"] },
@@ -1419,6 +1418,7 @@ dependencies = [
 dev = [
     { name = "httpx2" },
     { name = "poethepoet" },
+    { name = "psycopg2-binary" },
     { name = "pymarkdownlnt" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -1435,7 +1435,6 @@ requires-dist = [
     { name = "fastapi" },
     { name = "greenlet" },
     { name = "jinja2" },
-    { name = "psycopg2-binary" },
     { name = "python-multipart" },
     { name = "sqlalchemy", specifier = ">=2.0" },
     { name = "uvicorn", extras = ["standard"] },
@@ -1445,6 +1444,7 @@ requires-dist = [
 dev = [
     { name = "httpx2" },
     { name = "poethepoet", specifier = ">=0.46.0" },
+    { name = "psycopg2-binary" },
     { name = "pymarkdownlnt", specifier = ">=0.9" },
     { name = "pytest" },
     { name = "pytest-asyncio" },

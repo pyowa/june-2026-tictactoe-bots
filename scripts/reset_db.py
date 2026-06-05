@@ -7,6 +7,7 @@ on the broker).
 Run with: uv run poe reset-db  (or `python -m scripts.reset_db`)
 """
 
+import asyncio
 import base64
 import json
 import subprocess
@@ -15,9 +16,16 @@ import urllib.parse
 import urllib.request
 
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
 
-from db.database import DATABASE_URL, create_sync_engine
-from db.models.base import Base
+import db.session
+
+# Importing the entity models registers them on `Base.metadata` so the
+# drop_all call below knows what tables exist.
+import entities.bot.model  # noqa: F401
+import entities.match.model  # noqa: F401
+import entities.move.model  # noqa: F401
+from db.base import Base
 
 RABBITMQ_MGMT_URL = "http://localhost:15672"
 RABBITMQ_USER = "guest"
@@ -67,15 +75,28 @@ def purge_rabbitmq_queues() -> None:
     print(f"  Purged {purged} queue(s).")
 
 
-def main() -> None:
-    print(f"Dropping all tables in {DATABASE_URL}...")
-    engine = create_sync_engine()
-    Base.metadata.drop_all(engine)
-    with engine.begin() as conn:
-        conn.execute(text("DROP TABLE IF EXISTS alembic_version"))
-    engine.dispose()
+async def _drop_all_tables() -> None:
+    """Drop the ORM tables and Alembic's version table via async engine.
+
+    Build a fresh async engine here (instead of using `db.session`'s shared
+    one) so this script doesn't depend on the module-level engine being in
+    any particular state. Reads `db.session.DATABASE_URL` at call time so
+    tests that call `db.session.reconfigure(...)` take effect here."""
+    engine = create_async_engine(db.session.DATABASE_URL)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        # Raw SQL: dropping alembic's bookkeeping table isn't expressed via
+        # `Base.metadata` (it's owned by alembic, not the ORM).
+        await conn.execute(text("DROP TABLE IF EXISTS alembic_version"))
+    await engine.dispose()
+
+
+async def main() -> None:
+    print(f"Dropping all tables in {db.session.DATABASE_URL}...")
+    await _drop_all_tables()
 
     print("Running migrations...")
+    # `alembic` is its own CLI with sync transport. Stays a subprocess.
     subprocess.run(["alembic", "upgrade", "head"], check=True)
 
     print(f"Purging RabbitMQ queues at {RABBITMQ_MGMT_URL}...")
@@ -85,4 +106,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

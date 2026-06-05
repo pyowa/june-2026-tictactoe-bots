@@ -3,8 +3,11 @@ import urllib.parse
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 import web.main
+from entities.bot.model import Bot
 from tests.conftest import upload
 from web.utils import extract_bot_name, extract_python_version
 
@@ -12,6 +15,18 @@ from web.utils import extract_bot_name, extract_python_version
 def read_owned_cookie(client: TestClient) -> dict:
     raw = client.cookies.get("ttt_owned_bots", "")
     return json.loads(urllib.parse.unquote(raw)) if raw else {}
+
+
+async def _read_bot_field(engine: AsyncEngine, stmt):
+    """Execute a SELECT and return the first row.
+
+    Replaces the sync `with Session(engine) as session: session.execute(...)`
+    pattern inside the test files now that the conftest fixture yields an
+    `AsyncEngine`."""
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        result = await session.execute(stmt)
+        return result
 
 
 def test_fresh_submission_succeeds(client):
@@ -140,38 +155,32 @@ def test_malformed_cookie_is_ignored(client):
     assert "submitted successfully" in resp.text
 
 
-def test_python_version_defaults_when_omitted(client, engine):
+async def test_python_version_defaults_when_omitted(client, engine):
     """Omitted `python:` field → defaults to the latest supported version."""
-    from sqlalchemy import select
-    from sqlalchemy.orm import Session
-
-    from db.models.bot import Bot
     from web.utils import DEFAULT_PYTHON_VERSION
     resp = upload(client, "MyBot")
     assert "submitted successfully" in resp.text
-    with Session(engine) as session:
-        row = session.execute(
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        row = (await session.execute(
             select(Bot.python_version).where(Bot.versioned_name == "MyBot")
-        ).one()
+        )).one()
     assert row[0] == DEFAULT_PYTHON_VERSION
 
 
 @pytest.mark.parametrize("version", ["3.10", "3.11", "3.12", "3.13", "3.14"])
-def test_python_version_supported_versions_accepted(
+async def test_python_version_supported_versions_accepted(
     client, engine, version: str
 ) -> None:
-    from sqlalchemy import select
-    from sqlalchemy.orm import Session
-
-    from db.models.bot import Bot
     slug = version.replace(".", "_")
     body = f'"""\nname: V{slug}\npython: {version}\n"""\nimport sys\n'.encode()
     resp = client.post("/submit", files={"file": ("bot.py", body, "text/plain")})
     assert "submitted successfully" in resp.text
-    with Session(engine) as session:
-        row = session.execute(
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        row = (await session.execute(
             select(Bot.python_version).where(Bot.base_name.like("V%")).limit(1)
-        ).first()
+        )).first()
     assert row is not None
     assert row[0] == version
 
@@ -285,34 +294,28 @@ def test_parse_cookie_returns_empty_dict_on_invalid_json() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_upload_stores_source_bytes_in_db(client, engine):
-    from sqlalchemy import select
-    from sqlalchemy.orm import Session
-
-    from db.models.bot import Bot
+async def test_upload_stores_source_bytes_in_db(client, engine):
     upload(client, "MyBot", extra="x = 42  # source marker\n")
-    with Session(engine) as session:
-        row = session.execute(
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        row = (await session.execute(
             select(Bot.source).where(Bot.versioned_name == "MyBot")
-        ).one()
+        )).one()
     stored = bytes(row[0])
     assert b"name: MyBot" in stored
     assert b"x = 42  # source marker" in stored
 
 
-def test_resubmit_stores_each_version_separately_in_db(client, engine):
-    from sqlalchemy import select
-    from sqlalchemy.orm import Session
-
-    from db.models.bot import Bot
+async def test_resubmit_stores_each_version_separately_in_db(client, engine):
     upload(client, "MyBot", extra="# v1 marker\n")
     upload(client, "MyBot", extra="# v2 marker\n")
-    with Session(engine) as session:
-        rows = session.execute(
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        rows = (await session.execute(
             select(Bot.versioned_name, Bot.source)
             .where(Bot.base_name == "MyBot")
             .order_by(Bot.version)
-        ).all()
+        )).all()
     assert len(rows) == 2
     assert rows[0].versioned_name == "MyBot"
     assert rows[1].versioned_name == "MyBotV2"
@@ -376,5 +379,3 @@ def test_enqueue_picks_higher_python_version(client, mock_queue):
     assert cross, "expected at least one cross-pair message"
     for m in cross:
         assert m.python_version == "3.13"
-
-

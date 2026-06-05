@@ -5,9 +5,14 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+# Import every entity model so its table is registered on `Base.metadata`
+# before Alembic introspects it for autogenerate / schema operations.
+import entities.bot.model  # noqa: F401
+import entities.match.model  # noqa: F401
+import entities.move.model  # noqa: F401
 from alembic import context
-from db.database import DATABASE_URL
-from db.models.base import Base
+from db.base import Base
+from db.session import DATABASE_URL
 
 config = context.config
 config.set_main_option("sqlalchemy.url", DATABASE_URL)

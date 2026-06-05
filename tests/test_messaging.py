@@ -38,24 +38,8 @@ def test_turn_queue_for_strips_dots() -> None:
 
 
 # ---------------------------------------------------------------------------
-# db.database sync helpers
+# db.session — expire_on_commit contract
 # ---------------------------------------------------------------------------
-
-
-def test_sync_url_converts_asyncpg_driver() -> None:
-    from db.database import sync_url
-    assert sync_url(
-        "postgresql+asyncpg://u:p@h/d"
-    ) == "postgresql+psycopg2://u:p@h/d"
-
-
-def test_create_sync_engine_uses_database_url() -> None:
-    from db.database import create_sync_engine
-    engine = create_sync_engine()
-    try:
-        assert engine.dialect.name == "postgresql"
-    finally:
-        engine.dispose()
 
 
 async def test_session_keeps_objects_valid_after_commit(engine) -> None:
@@ -70,13 +54,13 @@ async def test_session_keeps_objects_valid_after_commit(engine) -> None:
     writing post-commit attribute reads that look fine locally but break
     under load. Without this test, flipping the flag back to `True` is
     silently undetected (no current code path exercises post-commit reads)."""
-    import db.database
-    from db.models.bot import Bot
+    import db.session
+    from entities.bot.model import Bot
     from tests.conftest import TEST_ASYNC_URL
 
-    db.database.reconfigure(TEST_ASYNC_URL)
+    db.session.reconfigure(TEST_ASYNC_URL)
 
-    async with db.database.get_session() as session:
+    async with db.session.get_session() as session:
         bot = Bot(
             base_name="ExpireProbe",
             versioned_name="ExpireProbeV1",

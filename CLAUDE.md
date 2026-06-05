@@ -56,7 +56,7 @@ When your change touches any of the below, update the docs **in the same change*
 - Drop database tables, run `poe reset-db`, or `docker compose down -v` outside of an explicitly-scoped task.
 - Add a new top-level dependency without a real need. If you do need one, add it to `pyproject.toml` and run `uv sync`, and explain why in your response.
 - Introduce a new technology (queueing system, ORM, test framework, web framework) when an existing one in this project would do.
-- **Put code in `__init__.py`.** Package `__init__.py` files stay empty. No module-level state, no functions, no env-var resolution, no re-export shortcuts — if a package needs a public surface, callers import from the deeper module path (`from db.models.bot import Bot`, not `from db.models import Bot`). Reason: `__init__.py` runs at import time and is easy to overlook as a code-search target; logic that lives there hides from readers, type-checkers (sometimes), and tests.
+- **Put code in `__init__.py`.** Package `__init__.py` files stay empty. No module-level state, no functions, no env-var resolution, no re-export shortcuts — if a package needs a public surface, callers import from the deeper module path (`from entities.bot.model import Bot`, not `from entities.bot import Bot`). Reason: `__init__.py` runs at import time and is easy to overlook as a code-search target; logic that lives there hides from readers, type-checkers (sometimes), and tests.
 
 ## Docker compose hygiene (during agent runs)
 

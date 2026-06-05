@@ -11,17 +11,8 @@ import secrets
 
 from fastapi import Request, UploadFile
 from fastapi.responses import HTMLResponse
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.database import (
-    get_next_version,
-    get_owner_token,
-    get_session,
-    insert_bot,
-    list_bots,
-)
-from db.models.bot import Bot
+from entities.bot.repository import BotRepository
 from messaging.queue import Queue
 from web.templates import render_index_response, templates
 from web.utils import (
@@ -80,12 +71,12 @@ def _validate_source(source_bytes: bytes) -> tuple[str, str]:
 
 
 async def _resolve_owner_token(
-    session: AsyncSession, bot_name: str, owned: dict[str, str]
+    bots: BotRepository, bot_name: str, owned: dict[str, str]
 ) -> str:
     """Return the owner token to use for this submission. Raises
     `_SubmissionError` if the name is owned by someone whose cookie doesn't
     match. Mints a fresh token when the name is unclaimed."""
-    existing_token = await get_owner_token(session, bot_name)
+    existing_token = await bots.owner_token(bot_name)
     if existing_token:
         if owned.get(bot_name) != existing_token:
             raise _SubmissionError(
@@ -97,26 +88,24 @@ async def _resolve_owner_token(
 
 
 async def _persist_bot(
-    session: AsyncSession,
+    bots: BotRepository,
     bot_name: str,
     owner_token: str,
     python_version: str,
     source_bytes: bytes,
 ) -> tuple[str, int]:
     """Insert the new bot row and return `(versioned_name, bot_id)`."""
-    version = await get_next_version(session, bot_name)
+    version = await bots.next_version(bot_name)
     name = versioned_name(bot_name, version)
-    await insert_bot(
-        session,
-        bot_name,
-        name,
-        version,
-        owner_token,
-        python_version,
+    bot = await bots.create(
+        base_name=bot_name,
+        versioned_name=name,
+        version=version,
+        owner_token=owner_token,
+        python_version=python_version,
         source=source_bytes,
     )
-    result = await session.execute(select(Bot.id).where(Bot.versioned_name == name))
-    return name, result.scalar_one()
+    return name, bot.id
 
 
 def _success_response(
@@ -149,6 +138,7 @@ async def handle_submission(
     file: UploadFile,
     owned_bots_cookie: str | None,
     queue: Queue,
+    bots: BotRepository,
 ) -> HTMLResponse:
     """Top-level handler for POST /submit. Reads the uploaded source,
     validates it, persists the bot, enqueues match jobs, and renders either
@@ -157,14 +147,13 @@ async def handle_submission(
     try:
         bot_name, python_version = _validate_source(source_bytes)
         owned = parse_cookie(owned_bots_cookie)
-        async with get_session() as session:
-            owner_token = await _resolve_owner_token(session, bot_name, owned)
-            name, new_bot_id = await _persist_bot(
-                session, bot_name, owner_token, python_version, source_bytes
-            )
-            await enqueue_match_pairs(queue, session, new_bot_id, python_version)
-            bots = await list_bots(session)
+        owner_token = await _resolve_owner_token(bots, bot_name, owned)
+        name, new_bot_id = await _persist_bot(
+            bots, bot_name, owner_token, python_version, source_bytes
+        )
+        await enqueue_match_pairs(queue, bots, new_bot_id, python_version)
+        listing = await bots.list_for_homepage()
     except _SubmissionError as exc:
         return render_index_response(request, error=exc.message)
 
-    return _success_response(request, name, owned, owner_token, bot_name, bots)
+    return _success_response(request, name, owned, owner_token, bot_name, listing)

@@ -11,10 +11,7 @@ import json
 import urllib.parse
 from typing import Any
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from db.models.bot import Bot
+from entities.bot.repository import BotRepository
 from messaging.queue import MatchJob, Queue
 from messaging.routing import pick_python_version
 
@@ -127,15 +124,15 @@ def group_matches_by_version(
 
 async def enqueue_match_pairs(
     queue: Queue,
-    session: AsyncSession,
+    bots: BotRepository,
     new_bot_id: int,
     new_python_version: str,
 ) -> None:
     """Enqueue one MatchJob per unplayed pair involving the newly inserted
     bot. Includes the self-pair (`new` vs `new`). The chosen Python version
     is `max(new, other)` so older bots run on newer interpreters."""
-    bots = (await session.scalars(select(Bot))).all()
-    for other in bots:
+    all_bots = await bots.all()
+    for other in all_bots:
         py = pick_python_version(new_python_version, other.python_version)
         await queue.enqueue_match(MatchJob(new_bot_id, other.id, py))
         if other.id != new_bot_id:

@@ -17,6 +17,7 @@ x-worker-base: &worker-base
     - ./web:/app/web
     - ./runner:/app/runner
     - ./db:/app/db
+    - ./entities:/app/entities
     - ./messaging:/app/messaging
     - ./alembic:/app/alembic
     - ./alembic.ini:/app/alembic.ini
@@ -77,6 +78,7 @@ services:
       - ./web:/app/web
       - ./runner:/app/runner
       - ./db:/app/db
+      - ./entities:/app/entities
       - ./messaging:/app/messaging
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini
@@ -104,6 +106,7 @@ services:
       - ./web:/app/web
       - ./runner:/app/runner
       - ./db:/app/db
+      - ./entities:/app/entities
       - ./messaging:/app/messaging
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini
@@ -133,6 +136,7 @@ services:
       - ./web:/app/web
       - ./runner:/app/runner
       - ./db:/app/db
+      - ./entities:/app/entities
       - ./messaging:/app/messaging
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini

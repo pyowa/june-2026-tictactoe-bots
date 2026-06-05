@@ -11,13 +11,13 @@ import asyncio
 import secrets
 from pathlib import Path
 
-from sqlalchemy import Engine, delete, func, select
-from sqlalchemy.orm import Session
+from sqlalchemy import delete
 
-from db.database import create_sync_engine
-from db.models.bot import Bot
-from db.models.match import Match
-from db.models.move import Move
+from db.session import get_session
+from entities.bot.model import Bot
+from entities.bot.repository import BotRepository
+from entities.match.model import Match
+from entities.move.model import Move
 from messaging.client import make_queue
 from messaging.queue import MatchJob, Queue
 from messaging.routing import pick_python_version
@@ -27,29 +27,27 @@ ROOT = Path(__file__).parent.parent
 EXAMPLE_BOTS_DIR = ROOT / "example_bots"
 
 
-async def enqueue_all_pairs(engine: Engine, queue: Queue) -> int:
+async def enqueue_all_pairs(bots: BotRepository, queue: Queue) -> int:
     """Enqueue one MatchJob per ordered pair (including self-pairs) so the
     orchestrator gets the full Cartesian product to work through."""
-    with Session(engine) as session:
-        bots = session.scalars(select(Bot).order_by(Bot.id)).all()
+    all_bots = await bots.all()
 
     count = 0
-    for x in bots:
-        for o in bots:
+    for x in all_bots:
+        for o in all_bots:
             py = pick_python_version(x.python_version, o.python_version)
             await queue.enqueue_match(MatchJob(x.id, o.id, py))
             count += 1
     return count
 
 
-def main() -> None:
-    engine = create_sync_engine()
-
-    with Session(engine) as session, session.begin():
+async def main() -> None:
+    async with get_session() as session:
         print("Clearing existing bots, matches, and moves...")
-        session.execute(delete(Move))
-        session.execute(delete(Match))
-        session.execute(delete(Bot))
+        await session.execute(delete(Move))
+        await session.execute(delete(Match))
+        await session.execute(delete(Bot))
+        await session.commit()
 
     sources = sorted(EXAMPLE_BOTS_DIR.glob("*.py"))
     if not sources:
@@ -57,7 +55,8 @@ def main() -> None:
         return
 
     inserted = 0
-    with Session(engine) as session, session.begin():
+    async with get_session() as session:
+        bots = BotRepository(session)
         for src in sources:
             source_bytes = src.read_bytes()
             source_text = source_bytes.decode("utf-8", errors="replace")
@@ -71,27 +70,23 @@ def main() -> None:
             # Multiple files can share a `name:` (e.g. perfect_bot_v1.py and
             # perfect_bot_v2.py both say "Perfect Bot"). Auto-version them
             # the same way the web upload flow does.
-            current_max = session.execute(
-                select(func.max(Bot.version)).where(Bot.base_name == bot_name)
-            ).scalar() or 0
-            version = current_max + 1
+            version = await bots.next_version(bot_name)
             v_name = versioned_name(bot_name, version)
 
-            session.add(
-                Bot(
-                    base_name=bot_name,
-                    versioned_name=v_name,
-                    version=version,
-                    owner_token=secrets.token_hex(32),
-                    python_version=python_version,
-                    source=source_bytes,
-                )
+            await bots.create(
+                base_name=bot_name,
+                versioned_name=v_name,
+                version=version,
+                owner_token=secrets.token_hex(32),
+                python_version=python_version,
+                source=source_bytes,
             )
             inserted += 1
             print(f"  {src.name:30s} -> {v_name}")
 
     queue = make_queue()
-    queued = asyncio.run(enqueue_all_pairs(engine, queue))
+    async with get_session() as session:
+        queued = await enqueue_all_pairs(BotRepository(session), queue)
     print(f"\nInserted {inserted} bots, enqueued {queued} match jobs to matches.todo.")
     print(
         "Run `docker compose up -d` to start the orchestrator + workers "
@@ -100,4 +95,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

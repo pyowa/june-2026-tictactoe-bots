@@ -2,6 +2,8 @@
 
 Catalog of every mock, patch, fake, stub, and dependency override in the test suite. Generated 2026-06-04.
 
+> **Note (2026-06-05):** the per-entity DB refactor (TODO bullet 3) renamed `db.database` → `db.session` + `entities/*/repository.py`, converted the conftest seed helpers (`db_insert_bot/match/move`) to async, and converted the bulk of `test_pages.py`, `test_submission.py`, `test_orchestrator.py`, `test_reset_db.py`, and `test_seed_example_bots.py` to `async def` (pytest-asyncio's `asyncio_mode = "auto"` picks them up without per-test decorators). The **mocks themselves are unchanged** — same `MagicMock`, `AsyncMock`, `monkeypatch.setattr`, and `_RecordingQueue` patterns — but the **line numbers below are pre-refactor**. The locations and intents still match; if a specific line number looks off, `grep` for the snippet in the current file. A full re-numbering pass is owned by TODO bullet 4 ("Audit test mocks") and will refresh this file end-to-end.
+
 ## Summary
 
 - Total entries: 50
@@ -18,14 +20,14 @@ Catalog of every mock, patch, fake, stub, and dependency override in the test su
 
 ### `_RecordingQueue` (custom fake class)
 
-- **Location:** `tests/conftest.py:93-100`
+- **Location:** `tests/conftest.py:119-127` (post-refactor)
 - **Replaces:** The `messaging.queue.Queue` protocol (specifically the `enqueue_match(job)` method).
 - **Mechanism:** Captures published `MatchJob`s into an in-memory `list[MatchJob]` so tests can assert without a real broker.
-- **Used by:** the `mock_queue` fixture (`tests/conftest.py:103-108`); the `client` fixture (`tests/conftest.py:111-116`) depends on `mock_queue`, so every test that takes `client` also gets a `_RecordingQueue` wired in transitively (notably across `tests/test_pages.py`, `tests/test_submission.py`, and `tests/test_seed_example_bots.py`).
+- **Used by:** the `mock_queue` fixture (`tests/conftest.py:129-134`); the `client` fixture (`tests/conftest.py:137-142`) depends on `mock_queue`, so every test that takes `client` also gets a `_RecordingQueue` wired in transitively (notably across `tests/test_pages.py`, `tests/test_submission.py`, and `tests/test_seed_example_bots.py`).
 
 ### `mock_queue` fixture — FastAPI dependency override
 
-- **Location:** `tests/conftest.py:103-108` (override at line 106)
+- **Location:** `tests/conftest.py:129-134` (override at line 132)
 - **Mock type:** `app.dependency_overrides[get_queue] = lambda: queue` (FastAPI dependency_override)
 - **Replaces:** `web.dependencies.get_queue` — the production dependency that would hand back the live `RabbitMQQueue` from `request.app.state.queue`.
 - **Reason:** Inject `_RecordingQueue` for the duration of each test so HTTP endpoints + scripts can publish "match jobs" without touching RabbitMQ. Cleared at teardown.

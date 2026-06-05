@@ -1,8 +1,8 @@
 from sqlalchemy import ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from db.models.base import Base
-from db.models.match import Match
+from db.base import Base
+from entities.match.model import Match
 
 
 class Move(Base):

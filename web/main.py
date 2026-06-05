@@ -6,18 +6,12 @@ from fastapi import Cookie, Depends, FastAPI, File, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from db.database import (
-    get_bot_family,
-    get_leaderboard,
-    get_match,
-    get_moves,
-    get_session,
-    list_bots,
-    list_matches,
-)
+from entities.bot.repository import BotRepository
+from entities.match.repository import MatchRepository
+from entities.move.repository import MoveRepository
 from messaging.client import make_queue
 from messaging.queue import Queue
-from web.dependencies import get_queue
+from web.dependencies import get_bots, get_matches, get_moves, get_queue
 from web.submit import handle_submission
 from web.templates import not_found, templates
 from web.utils import group_matches_by_version
@@ -45,10 +39,11 @@ app.mount(
 
 
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request) -> HTMLResponse:
-    async with get_session() as session:
-        bots = await list_bots(session)
-    return templates.TemplateResponse(request, "index.html", {"bots": bots})
+async def index(
+    request: Request, bots: BotRepository = Depends(get_bots)
+) -> HTMLResponse:
+    rows = await bots.list_for_homepage()
+    return templates.TemplateResponse(request, "index.html", {"bots": rows})
 
 
 @app.post("/submit", response_class=HTMLResponse)
@@ -57,32 +52,39 @@ async def submit_bot(
     file: UploadFile = File(...),
     ttt_owned_bots: str | None = Cookie(default=None),
     queue: Queue = Depends(get_queue),
+    bots: BotRepository = Depends(get_bots),
 ) -> HTMLResponse:
-    return await handle_submission(request, file, ttt_owned_bots, queue)
+    return await handle_submission(request, file, ttt_owned_bots, queue, bots)
 
 
 @app.get("/leaderboard", response_class=HTMLResponse)
-async def leaderboard(request: Request) -> HTMLResponse:
-    async with get_session() as session:
-        rows = await get_leaderboard(session)
+async def leaderboard(
+    request: Request, bots: BotRepository = Depends(get_bots)
+) -> HTMLResponse:
+    rows = await bots.leaderboard()
     return templates.TemplateResponse(request, "leaderboard.html", {"rows": rows})
 
 
 @app.get("/matches", response_class=HTMLResponse)
-async def matches(request: Request) -> HTMLResponse:
-    async with get_session() as session:
-        rows = await list_matches(session)
+async def matches(
+    request: Request, matches: MatchRepository = Depends(get_matches)
+) -> HTMLResponse:
+    rows = await matches.list_all()
     return templates.TemplateResponse(request, "matches.html", {"matches": rows})
 
 
 @app.get("/bots/{base_name}", response_class=HTMLResponse)
-async def bot_family(request: Request, base_name: str) -> HTMLResponse:
-    async with get_session() as session:
-        versions = await get_bot_family(session, base_name)
-        if not versions:
-            return not_found(request)
-        matches = await list_matches(session, bot_name=base_name)
-    grouped = group_matches_by_version(versions, matches)
+async def bot_family(
+    request: Request,
+    base_name: str,
+    bots: BotRepository = Depends(get_bots),
+    matches: MatchRepository = Depends(get_matches),
+) -> HTMLResponse:
+    versions = await bots.family(base_name)
+    if not versions:
+        return not_found(request)
+    match_rows = await matches.list_for_bot(base_name)
+    grouped = group_matches_by_version(versions, match_rows)
     return templates.TemplateResponse(
         request,
         "bot_detail.html",
@@ -91,16 +93,33 @@ async def bot_family(request: Request, base_name: str) -> HTMLResponse:
 
 
 @app.get("/matches/{match_id}", response_class=HTMLResponse)
-async def match_detail(request: Request, match_id: int) -> HTMLResponse:
-    return await _render_match(request, match_id, "/matches", "Back to matches")
+async def match_detail(
+    request: Request,
+    match_id: int,
+    matches: MatchRepository = Depends(get_matches),
+    moves: MoveRepository = Depends(get_moves),
+) -> HTMLResponse:
+    return await _render_match(
+        request, match_id, "/matches", "Back to matches", matches, moves
+    )
 
 
 @app.get("/bots/{base_name}/matches/{match_id}", response_class=HTMLResponse)
 async def bot_match_detail(
-    request: Request, base_name: str, match_id: int
+    request: Request,
+    base_name: str,
+    match_id: int,
+    matches: MatchRepository = Depends(get_matches),
+    moves: MoveRepository = Depends(get_moves),
 ) -> HTMLResponse:
     return await _render_match(
-        request, match_id, f"/bots/{base_name}", f"Back to {base_name}", base_name
+        request,
+        match_id,
+        f"/bots/{base_name}",
+        f"Back to {base_name}",
+        matches,
+        moves,
+        bot_base_name=base_name,
     )
 
 
@@ -109,19 +128,20 @@ async def _render_match(
     match_id: int,
     back_url: str,
     back_label: str,
+    matches: MatchRepository,
+    moves: MoveRepository,
     bot_base_name: str | None = None,
 ) -> HTMLResponse:
-    async with get_session() as session:
-        match = await get_match(session, match_id, bot_base_name=bot_base_name)
-        if match is None:
-            return not_found(request)
-        moves = await get_moves(session, match_id)
+    match = await matches.by_id(match_id, bot_base_name=bot_base_name)
+    if match is None:
+        return not_found(request)
+    move_rows = await moves.for_match(match_id)
     return templates.TemplateResponse(
         request,
         "match_detail.html",
         {
             "match": match,
-            "moves": moves,
+            "moves": move_rows,
             "back_url": back_url,
             "back_label": back_label,
         },

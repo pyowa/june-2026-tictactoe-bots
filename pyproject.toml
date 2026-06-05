@@ -11,7 +11,10 @@ dependencies = [
     "alembic>=1.13",
     "greenlet",
     "asyncpg",
-    "psycopg2-binary",
+    # psycopg2 is only used for the sync admin connection in tests/conftest.py
+    # (CREATE DATABASE before the async machinery is alive) — kept as a dev
+    # dependency below rather than a runtime one. Production / scripts /
+    # runner / web all use asyncpg exclusively.
     "aio-pika",
 ]
 
@@ -28,6 +31,10 @@ dev = [
     "ty",
     "poethepoet>=0.46.0",
     "pymarkdownlnt>=0.9",
+    # Only the test conftest's admin-database bootstrap uses psycopg2 (sync
+    # connection for CREATE DATABASE before the async machinery comes up).
+    # The runtime app is async-only.
+    "psycopg2-binary",
 ]
 
 [tool.poe.tasks]
@@ -35,7 +42,7 @@ test         = "pytest"
 lint         = "ruff check ."
 lint-md      = "pymarkdown scan README.md TODO.md CLAUDE.md"
 format       = "ruff format ."
-typecheck    = "ty check web/ db/ runner/ messaging/ scripts/ tests/"
+typecheck    = "ty check web/ db/ entities/ runner/ messaging/ scripts/ tests/"
 seed-examples = "python -m scripts.seed_example_bots"
 reset-db     = "python -m scripts.reset_db"
 
@@ -55,7 +62,7 @@ ignore = ["ANN401"]
 "scripts/*" = ["ANN"]
 
 [tool.pytest.ini_options]
-addopts = "--cov=web --cov=db --cov=runner --cov=messaging --cov=scripts --cov-report=term-missing"
+addopts = "--cov=web --cov=db --cov=entities --cov=runner --cov=messaging --cov=scripts --cov-report=term-missing"
 asyncio_mode = "auto"
 
 [tool.coverage.run]

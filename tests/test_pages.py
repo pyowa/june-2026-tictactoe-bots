@@ -33,12 +33,12 @@ def test_leaderboard_shows_submitted_bots(client):
     assert "Hal" in resp.text
 
 
-def test_leaderboard_orders_by_wins_descending(client, engine):
-    a = db_insert_bot(engine, "LowBot")
-    b = db_insert_bot(engine, "HighBot")
-    db_insert_match(engine, a, b, winner_id=b, result="o_wins")
-    db_insert_match(engine, a, b, winner_id=b, result="o_wins")
-    db_insert_match(engine, a, b, winner_id=a, result="x_wins")
+async def test_leaderboard_orders_by_wins_descending(client, engine):
+    a = await db_insert_bot(engine, "LowBot")
+    b = await db_insert_bot(engine, "HighBot")
+    await db_insert_match(engine, a, b, winner_id=b, result="o_wins")
+    await db_insert_match(engine, a, b, winner_id=b, result="o_wins")
+    await db_insert_match(engine, a, b, winner_id=a, result="x_wins")
 
     resp = client.get("/leaderboard")
     text = resp.text
@@ -46,24 +46,28 @@ def test_leaderboard_orders_by_wins_descending(client, engine):
     assert text.index("HighBot") < text.index("LowBot")
 
 
-def test_leaderboard_tie_broken_by_earlier_submission(client, engine):
-    early = db_insert_bot(engine, "EarlyBot", submitted_at="2024-01-01 00:00:00")
-    late = db_insert_bot(engine, "LateBot", submitted_at="2024-06-01 00:00:00")
+async def test_leaderboard_tie_broken_by_earlier_submission(client, engine):
+    early = await db_insert_bot(
+        engine, "EarlyBot", submitted_at="2024-01-01 00:00:00"
+    )
+    late = await db_insert_bot(
+        engine, "LateBot", submitted_at="2024-06-01 00:00:00"
+    )
     # Give each one win so they're tied
-    db_insert_match(engine, early, late, winner_id=early, result="x_wins")
-    db_insert_match(engine, late, early, winner_id=late, result="x_wins")
+    await db_insert_match(engine, early, late, winner_id=early, result="x_wins")
+    await db_insert_match(engine, late, early, winner_id=late, result="x_wins")
 
     resp = client.get("/leaderboard")
     text = resp.text
     assert text.index("EarlyBot") < text.index("LateBot")
 
 
-def test_leaderboard_clean_win_count_is_correct(client, engine):
-    a = db_insert_bot(engine, "BotA")
-    b = db_insert_bot(engine, "BotB")
-    db_insert_match(engine, a, b, winner_id=a, result="x_wins")
-    db_insert_match(engine, a, b, winner_id=a, result="x_wins")
-    db_insert_match(engine, a, b, winner_id=a, result="x_wins")
+async def test_leaderboard_clean_win_count_is_correct(client, engine):
+    a = await db_insert_bot(engine, "BotA")
+    b = await db_insert_bot(engine, "BotB")
+    await db_insert_match(engine, a, b, winner_id=a, result="x_wins")
+    await db_insert_match(engine, a, b, winner_id=a, result="x_wins")
+    await db_insert_match(engine, a, b, winner_id=a, result="x_wins")
 
     resp = client.get("/leaderboard")
     text = resp.text
@@ -72,11 +76,11 @@ def test_leaderboard_clean_win_count_is_correct(client, engine):
     assert ">3<" in row_section
 
 
-def test_leaderboard_forfeit_win_shown_separately(client, engine):
-    a = db_insert_bot(engine, "GoodBot")
-    b = db_insert_bot(engine, "CrashBot")
-    db_insert_match(engine, a, b, winner_id=a, result="x_wins")
-    db_insert_match(engine, a, b, winner_id=a, result="o_forfeit")
+async def test_leaderboard_forfeit_win_shown_separately(client, engine):
+    a = await db_insert_bot(engine, "GoodBot")
+    b = await db_insert_bot(engine, "CrashBot")
+    await db_insert_match(engine, a, b, winner_id=a, result="x_wins")
+    await db_insert_match(engine, a, b, winner_id=a, result="o_forfeit")
 
     resp = client.get("/leaderboard")
     text = resp.text
@@ -87,20 +91,20 @@ def test_leaderboard_forfeit_win_shown_separately(client, engine):
     assert row_section.count(">1<") == 2
 
 
-def test_leaderboard_forfeit_win_ranks_above_zero_wins(client, engine):
-    a = db_insert_bot(engine, "GoodBot")
-    b = db_insert_bot(engine, "CrashBot")
-    db_insert_match(engine, a, b, winner_id=a, result="o_forfeit")
+async def test_leaderboard_forfeit_win_ranks_above_zero_wins(client, engine):
+    a = await db_insert_bot(engine, "GoodBot")
+    b = await db_insert_bot(engine, "CrashBot")
+    await db_insert_match(engine, a, b, winner_id=a, result="o_forfeit")
 
     resp = client.get("/leaderboard")
     text = resp.text
     assert text.index("GoodBot") < text.index("CrashBot")
 
 
-def test_leaderboard_draw_not_counted_as_win(client, engine):
-    a = db_insert_bot(engine, "DrawBot")
-    b = db_insert_bot(engine, "OtherBot")
-    db_insert_match(engine, a, b, winner_id=None, result="cat")
+async def test_leaderboard_draw_not_counted_as_win(client, engine):
+    a = await db_insert_bot(engine, "DrawBot")
+    b = await db_insert_bot(engine, "OtherBot")
+    await db_insert_match(engine, a, b, winner_id=None, result="cat")
 
     resp = client.get("/leaderboard")
     text = resp.text
@@ -124,10 +128,10 @@ def test_matches_empty_state(client):
     assert "No matches played yet" in resp.text
 
 
-def test_matches_shows_both_bot_names(client, engine):
-    a = db_insert_bot(engine, "AlphaBot")
-    b = db_insert_bot(engine, "BetaBot")
-    db_insert_match(engine, a, b, winner_id=a, result="x_wins")
+async def test_matches_shows_both_bot_names(client, engine):
+    a = await db_insert_bot(engine, "AlphaBot")
+    b = await db_insert_bot(engine, "BetaBot")
+    await db_insert_match(engine, a, b, winner_id=a, result="x_wins")
 
     resp = client.get("/matches")
     assert "AlphaBot" in resp.text
@@ -144,27 +148,27 @@ def test_matches_shows_both_bot_names(client, engine):
         ("o_forfeit", "BetaBot forfeited"),
     ],
 )
-def test_matches_result_label(client, engine, result, expected):
-    a = db_insert_bot(engine, "AlphaBot")
-    b = db_insert_bot(engine, "BetaBot")
+async def test_matches_result_label(client, engine, result, expected):
+    a = await db_insert_bot(engine, "AlphaBot")
+    b = await db_insert_bot(engine, "BetaBot")
     winner_id = a if result == "x_wins" else b if result == "o_wins" else None
     if result in ("x_forfeit",):
         winner_id = b
     if result in ("o_forfeit",):
         winner_id = a
-    db_insert_match(engine, a, b, winner_id=winner_id, result=result)
+    await db_insert_match(engine, a, b, winner_id=winner_id, result=result)
 
     resp = client.get("/matches")
     assert expected in resp.text
 
 
-def test_matches_most_recent_first(client, engine):
-    a = db_insert_bot(engine, "BotA")
-    b = db_insert_bot(engine, "BotB")
-    db_insert_match(
+async def test_matches_most_recent_first(client, engine):
+    a = await db_insert_bot(engine, "BotA")
+    b = await db_insert_bot(engine, "BotB")
+    await db_insert_match(
         engine, a, b, winner_id=a, result="x_wins", played_at="2024-01-01 00:00:00"
     )
-    db_insert_match(
+    await db_insert_match(
         engine, b, a, winner_id=b, result="x_wins", played_at="2024-06-01 00:00:00"
     )
 
@@ -177,21 +181,21 @@ def test_matches_most_recent_first(client, engine):
     assert first_occurrence_b < first_occurrence_a
 
 
-def test_matches_contains_link_to_detail(client, engine):
-    a = db_insert_bot(engine, "BotA")
-    b = db_insert_bot(engine, "BotB")
-    match_id = db_insert_match(engine, a, b, winner_id=None, result="cat")
+async def test_matches_contains_link_to_detail(client, engine):
+    a = await db_insert_bot(engine, "BotA")
+    b = await db_insert_bot(engine, "BotB")
+    match_id = await db_insert_match(engine, a, b, winner_id=None, result="cat")
 
     resp = client.get("/matches")
     assert f"/matches/{match_id}" in resp.text
 
 
-def test_matches_lists_all_matches(client, engine):
-    a = db_insert_bot(engine, "AlphaBot")
-    b = db_insert_bot(engine, "BetaBot")
-    c = db_insert_bot(engine, "GammaBot")
-    db_insert_match(engine, a, b, winner_id=a, result="x_wins")
-    db_insert_match(engine, b, c, winner_id=b, result="x_wins")
+async def test_matches_lists_all_matches(client, engine):
+    a = await db_insert_bot(engine, "AlphaBot")
+    b = await db_insert_bot(engine, "BetaBot")
+    c = await db_insert_bot(engine, "GammaBot")
+    await db_insert_match(engine, a, b, winner_id=a, result="x_wins")
+    await db_insert_match(engine, b, c, winner_id=b, result="x_wins")
 
     resp = client.get("/matches")
     assert "AlphaBot" in resp.text
@@ -199,46 +203,46 @@ def test_matches_lists_all_matches(client, engine):
     assert "GammaBot" in resp.text
 
 
-def test_matches_bot_names_link_to_bot_detail(client, engine):
-    a = db_insert_bot(engine, "AlphaBot")
-    b = db_insert_bot(engine, "BetaBot")
-    db_insert_match(engine, a, b, winner_id=a, result="x_wins")
+async def test_matches_bot_names_link_to_bot_detail(client, engine):
+    a = await db_insert_bot(engine, "AlphaBot")
+    b = await db_insert_bot(engine, "BetaBot")
+    await db_insert_match(engine, a, b, winner_id=a, result="x_wins")
 
     resp = client.get("/matches")
     assert '<a href="/bots/AlphaBot">AlphaBot</a>' in resp.text
     assert '<a href="/bots/BetaBot">BetaBot</a>' in resp.text
 
 
-def test_match_detail_bot_names_link_to_bot_detail(client, engine):
-    a = db_insert_bot(engine, "AlphaBot")
-    b = db_insert_bot(engine, "BetaBot")
-    match_id = db_insert_match(engine, a, b, winner_id=a, result="x_wins")
+async def test_match_detail_bot_names_link_to_bot_detail(client, engine):
+    a = await db_insert_bot(engine, "AlphaBot")
+    b = await db_insert_bot(engine, "BetaBot")
+    match_id = await db_insert_match(engine, a, b, winner_id=a, result="x_wins")
 
     resp = client.get(f"/matches/{match_id}")
     assert '<a href="/bots/AlphaBot">AlphaBot</a>' in resp.text
     assert '<a href="/bots/BetaBot">BetaBot</a>' in resp.text
 
 
-def test_bot_detail_opponent_names_link_to_bot_detail(client, engine):
-    a = db_insert_bot(engine, "AlphaBot")
-    b = db_insert_bot(engine, "BetaBot")
-    db_insert_match(engine, a, b, winner_id=a, result="x_wins")
+async def test_bot_detail_opponent_names_link_to_bot_detail(client, engine):
+    a = await db_insert_bot(engine, "AlphaBot")
+    b = await db_insert_bot(engine, "BetaBot")
+    await db_insert_match(engine, a, b, winner_id=a, result="x_wins")
 
     resp = client.get("/bots/AlphaBot")
     assert '<a href="/bots/BetaBot">BetaBot</a>' in resp.text
 
 
-def test_leaderboard_bot_name_links_to_bot_detail(client, engine):
-    db_insert_bot(engine, "AlphaBot")
+async def test_leaderboard_bot_name_links_to_bot_detail(client, engine):
+    await db_insert_bot(engine, "AlphaBot")
 
     resp = client.get("/leaderboard")
     assert "/bots/AlphaBot" in resp.text
 
 
-def test_leaderboard_shows_only_latest_version_per_family(client, engine):
+async def test_leaderboard_shows_only_latest_version_per_family(client, engine):
     """When MyBot has V1 and V2, only V2 appears as a leaderboard row."""
-    db_insert_bot(engine, "MyBot", submitted_at="2024-01-01 10:00:00")
-    db_insert_bot(
+    await db_insert_bot(engine, "MyBot", submitted_at="2024-01-01 10:00:00")
+    await db_insert_bot(
         engine, "MyBot", versioned_name="MyBotV2", version=2,
         submitted_at="2024-01-02 10:00:00",
     )
@@ -249,10 +253,10 @@ def test_leaderboard_shows_only_latest_version_per_family(client, engine):
     assert "<a href=\"/bots/MyBot\">MyBotV2</a>" in resp.text
 
 
-def test_leaderboard_shows_lifetime_column(client, engine):
-    a = db_insert_bot(engine, "AlphaBot")
-    b = db_insert_bot(engine, "BetaBot")
-    db_insert_match(engine, a, b, winner_id=a, result="x_wins")
+async def test_leaderboard_shows_lifetime_column(client, engine):
+    a = await db_insert_bot(engine, "AlphaBot")
+    b = await db_insert_bot(engine, "BetaBot")
+    await db_insert_match(engine, a, b, winner_id=a, result="x_wins")
 
     resp = client.get("/leaderboard")
     assert "Lifetime" in resp.text
@@ -271,72 +275,72 @@ def test_match_detail_404_for_unknown_id(client):
     assert resp.status_code == 404
 
 
-def test_match_detail_returns_200(client, engine):
-    a = db_insert_bot(engine, "BotA")
-    b = db_insert_bot(engine, "BotB")
-    match_id = db_insert_match(engine, a, b, winner_id=a, result="x_wins")
+async def test_match_detail_returns_200(client, engine):
+    a = await db_insert_bot(engine, "BotA")
+    b = await db_insert_bot(engine, "BotB")
+    match_id = await db_insert_match(engine, a, b, winner_id=a, result="x_wins")
 
     resp = client.get(f"/matches/{match_id}")
     assert resp.status_code == 200
 
 
-def test_match_detail_shows_both_bot_names(client, engine):
-    a = db_insert_bot(engine, "BotA")
-    b = db_insert_bot(engine, "BotB")
-    match_id = db_insert_match(engine, a, b, winner_id=a, result="x_wins")
+async def test_match_detail_shows_both_bot_names(client, engine):
+    a = await db_insert_bot(engine, "BotA")
+    b = await db_insert_bot(engine, "BotB")
+    match_id = await db_insert_match(engine, a, b, winner_id=a, result="x_wins")
 
     resp = client.get(f"/matches/{match_id}")
     assert "BotA" in resp.text
     assert "BotB" in resp.text
 
 
-def test_match_detail_shows_python_versions(client, engine):
-    a = db_insert_bot(engine, "BotA", python_version="3.11")
-    b = db_insert_bot(engine, "BotB", python_version="3.12")
-    match_id = db_insert_match(engine, a, b, winner_id=a, result="x_wins")
+async def test_match_detail_shows_python_versions(client, engine):
+    a = await db_insert_bot(engine, "BotA", python_version="3.11")
+    b = await db_insert_bot(engine, "BotB", python_version="3.12")
+    match_id = await db_insert_match(engine, a, b, winner_id=a, result="x_wins")
 
     resp = client.get(f"/matches/{match_id}")
     assert "Python 3.11" in resp.text
     assert "Python 3.12" in resp.text
 
 
-def test_matches_list_shows_python_versions(client, engine):
-    a = db_insert_bot(engine, "BotA", python_version="3.11")
-    b = db_insert_bot(engine, "BotB", python_version="3.12")
-    db_insert_match(engine, a, b, winner_id=a, result="x_wins")
+async def test_matches_list_shows_python_versions(client, engine):
+    a = await db_insert_bot(engine, "BotA", python_version="3.11")
+    b = await db_insert_bot(engine, "BotB", python_version="3.12")
+    await db_insert_match(engine, a, b, winner_id=a, result="x_wins")
 
     resp = client.get("/matches")
     assert "py3.11" in resp.text
     assert "py3.12" in resp.text
 
 
-def test_match_detail_shows_result(client, engine):
-    a = db_insert_bot(engine, "BotA")
-    b = db_insert_bot(engine, "BotB")
-    match_id = db_insert_match(engine, a, b, winner_id=a, result="x_wins")
+async def test_match_detail_shows_result(client, engine):
+    a = await db_insert_bot(engine, "BotA")
+    b = await db_insert_bot(engine, "BotB")
+    match_id = await db_insert_match(engine, a, b, winner_id=a, result="x_wins")
 
     resp = client.get(f"/matches/{match_id}")
     assert "BotA won" in resp.text
 
 
-def test_match_detail_shows_moves_in_order(client, engine):
-    a = db_insert_bot(engine, "BotA")
-    b = db_insert_bot(engine, "BotB")
-    match_id = db_insert_match(engine, a, b, winner_id=a, result="x_wins")
-    db_insert_move(engine, match_id, 1, a, BOARD_AFTER_X)
-    db_insert_move(engine, match_id, 2, b, BOARD_AFTER_O)
+async def test_match_detail_shows_moves_in_order(client, engine):
+    a = await db_insert_bot(engine, "BotA")
+    b = await db_insert_bot(engine, "BotB")
+    match_id = await db_insert_match(engine, a, b, winner_id=a, result="x_wins")
+    await db_insert_move(engine, match_id, 1, a, BOARD_AFTER_X)
+    await db_insert_move(engine, match_id, 2, b, BOARD_AFTER_O)
 
     resp = client.get(f"/matches/{match_id}")
     text = resp.text
     assert text.index("Move 1") < text.index("Move 2")
 
 
-def test_match_detail_shows_which_bot_made_each_move(client, engine):
-    a = db_insert_bot(engine, "BotA")
-    b = db_insert_bot(engine, "BotB")
-    match_id = db_insert_match(engine, a, b, winner_id=a, result="x_wins")
-    db_insert_move(engine, match_id, 1, a, BOARD_AFTER_X)
-    db_insert_move(engine, match_id, 2, b, BOARD_AFTER_O)
+async def test_match_detail_shows_which_bot_made_each_move(client, engine):
+    a = await db_insert_bot(engine, "BotA")
+    b = await db_insert_bot(engine, "BotB")
+    match_id = await db_insert_match(engine, a, b, winner_id=a, result="x_wins")
+    await db_insert_move(engine, match_id, 1, a, BOARD_AFTER_X)
+    await db_insert_move(engine, match_id, 2, b, BOARD_AFTER_O)
 
     resp = client.get(f"/matches/{match_id}")
     text = resp.text
@@ -346,12 +350,12 @@ def test_match_detail_shows_which_bot_made_each_move(client, engine):
     assert "BotB" in move2_section
 
 
-def test_match_detail_shows_error_for_forfeit_move(client, engine):
-    a = db_insert_bot(engine, "GoodBot")
-    b = db_insert_bot(engine, "CrashBot")
-    match_id = db_insert_match(engine, a, b, winner_id=a, result="o_forfeit")
-    db_insert_move(engine, match_id, 1, a, BOARD_AFTER_X)
-    db_insert_move(
+async def test_match_detail_shows_error_for_forfeit_move(client, engine):
+    a = await db_insert_bot(engine, "GoodBot")
+    b = await db_insert_bot(engine, "CrashBot")
+    match_id = await db_insert_match(engine, a, b, winner_id=a, result="o_forfeit")
+    await db_insert_move(engine, match_id, 1, a, BOARD_AFTER_X)
+    await db_insert_move(
         engine, match_id, 2, b, BOARD_AFTER_X, error="invalid output: empty response"
     )
 
@@ -359,19 +363,19 @@ def test_match_detail_shows_error_for_forfeit_move(client, engine):
     assert "invalid output: empty response" in resp.text
 
 
-def test_match_detail_no_moves_shows_empty_state(client, engine):
-    a = db_insert_bot(engine, "BotA")
-    b = db_insert_bot(engine, "BotB")
-    match_id = db_insert_match(engine, a, b, winner_id=None, result="cat")
+async def test_match_detail_no_moves_shows_empty_state(client, engine):
+    a = await db_insert_bot(engine, "BotA")
+    b = await db_insert_bot(engine, "BotB")
+    match_id = await db_insert_match(engine, a, b, winner_id=None, result="cat")
 
     resp = client.get(f"/matches/{match_id}")
     assert "No moves recorded" in resp.text
 
 
-def test_match_detail_back_link_to_matches(client, engine):
-    a = db_insert_bot(engine, "BotA")
-    b = db_insert_bot(engine, "BotB")
-    match_id = db_insert_match(engine, a, b, winner_id=None, result="cat")
+async def test_match_detail_back_link_to_matches(client, engine):
+    a = await db_insert_bot(engine, "BotA")
+    b = await db_insert_bot(engine, "BotB")
+    match_id = await db_insert_match(engine, a, b, winner_id=None, result="cat")
 
     resp = client.get(f"/matches/{match_id}")
     assert 'href="/matches"' in resp.text
@@ -383,29 +387,29 @@ def test_match_detail_back_link_to_matches(client, engine):
 # ---------------------------------------------------------------------------
 
 
-def test_bot_match_detail_returns_200_when_bot_is_x(client, engine):
-    a = db_insert_bot(engine, "BotA")
-    b = db_insert_bot(engine, "BotB")
-    match_id = db_insert_match(engine, a, b, winner_id=a, result="x_wins")
+async def test_bot_match_detail_returns_200_when_bot_is_x(client, engine):
+    a = await db_insert_bot(engine, "BotA")
+    b = await db_insert_bot(engine, "BotB")
+    match_id = await db_insert_match(engine, a, b, winner_id=a, result="x_wins")
 
     resp = client.get(f"/bots/BotA/matches/{match_id}")
     assert resp.status_code == 200
 
 
-def test_bot_match_detail_returns_200_when_bot_is_o(client, engine):
-    a = db_insert_bot(engine, "BotA")
-    b = db_insert_bot(engine, "BotB")
-    match_id = db_insert_match(engine, a, b, winner_id=b, result="o_wins")
+async def test_bot_match_detail_returns_200_when_bot_is_o(client, engine):
+    a = await db_insert_bot(engine, "BotA")
+    b = await db_insert_bot(engine, "BotB")
+    match_id = await db_insert_match(engine, a, b, winner_id=b, result="o_wins")
 
     resp = client.get(f"/bots/BotB/matches/{match_id}")
     assert resp.status_code == 200
 
 
-def test_bot_match_detail_404_for_match_not_involving_bot(client, engine):
-    db_insert_bot(engine, "BotA")
-    b = db_insert_bot(engine, "BotB")
-    c = db_insert_bot(engine, "BotC")
-    match_id = db_insert_match(engine, b, c, winner_id=b, result="x_wins")
+async def test_bot_match_detail_404_for_match_not_involving_bot(client, engine):
+    await db_insert_bot(engine, "BotA")
+    b = await db_insert_bot(engine, "BotB")
+    c = await db_insert_bot(engine, "BotC")
+    match_id = await db_insert_match(engine, b, c, winner_id=b, result="x_wins")
 
     resp = client.get(f"/bots/BotA/matches/{match_id}")
     assert resp.status_code == 404
@@ -416,20 +420,20 @@ def test_bot_match_detail_404_for_unknown_match(client):
     assert resp.status_code == 404
 
 
-def test_bot_match_detail_back_link_to_bot(client, engine):
-    a = db_insert_bot(engine, "BotA")
-    b = db_insert_bot(engine, "BotB")
-    match_id = db_insert_match(engine, a, b, winner_id=None, result="cat")
+async def test_bot_match_detail_back_link_to_bot(client, engine):
+    a = await db_insert_bot(engine, "BotA")
+    b = await db_insert_bot(engine, "BotB")
+    match_id = await db_insert_match(engine, a, b, winner_id=None, result="cat")
 
     resp = client.get(f"/bots/BotA/matches/{match_id}")
     assert 'href="/bots/BotA"' in resp.text
     assert "Back to BotA" in resp.text
 
 
-def test_bot_detail_links_to_nested_match_url(client, engine):
-    a = db_insert_bot(engine, "BotA")
-    b = db_insert_bot(engine, "BotB")
-    match_id = db_insert_match(engine, a, b, winner_id=a, result="x_wins")
+async def test_bot_detail_links_to_nested_match_url(client, engine):
+    a = await db_insert_bot(engine, "BotA")
+    b = await db_insert_bot(engine, "BotB")
+    match_id = await db_insert_match(engine, a, b, winner_id=a, result="x_wins")
 
     resp = client.get("/bots/BotA")
     assert f'/bots/BotA/matches/{match_id}' in resp.text
@@ -445,16 +449,16 @@ def test_bot_family_404_for_unknown_base_name(client):
     assert resp.status_code == 404
 
 
-def test_bot_family_lists_all_versions_latest_first(client, engine):
-    db_insert_bot(engine, "MyBot", submitted_at="2024-01-01 10:00:00")
-    db_insert_bot(
+async def test_bot_family_lists_all_versions_latest_first(client, engine):
+    await db_insert_bot(engine, "MyBot", submitted_at="2024-01-01 10:00:00")
+    await db_insert_bot(
         engine,
         "MyBot",
         submitted_at="2024-01-02 10:00:00",
         version=2,
         versioned_name="MyBotV2",
     )
-    db_insert_bot(
+    await db_insert_bot(
         engine,
         "MyBot",
         submitted_at="2024-01-03 10:00:00",
@@ -475,22 +479,22 @@ def test_bot_family_lists_all_versions_latest_first(client, engine):
     assert v3 < v2 < v1
 
 
-def test_bot_family_groups_matches_under_each_version(client, engine):
-    v1 = db_insert_bot(engine, "MyBot", submitted_at="2024-01-01 10:00:00")
-    v2 = db_insert_bot(
+async def test_bot_family_groups_matches_under_each_version(client, engine):
+    v1 = await db_insert_bot(engine, "MyBot", submitted_at="2024-01-01 10:00:00")
+    v2 = await db_insert_bot(
         engine,
         "MyBot",
         submitted_at="2024-01-02 10:00:00",
         version=2,
         versioned_name="MyBotV2",
     )
-    other = db_insert_bot(engine, "OtherBot")
+    other = await db_insert_bot(engine, "OtherBot")
 
     # V1 plays Other (V1 wins); V2 plays Other (Other wins).
-    db_insert_match(engine, v1, other, winner_id=v1, result="x_wins",
-                    played_at="2024-01-05 10:00:00")
-    db_insert_match(engine, v2, other, winner_id=other, result="o_wins",
-                    played_at="2024-01-06 10:00:00")
+    await db_insert_match(engine, v1, other, winner_id=v1, result="x_wins",
+                          played_at="2024-01-05 10:00:00")
+    await db_insert_match(engine, v2, other, winner_id=other, result="o_wins",
+                          played_at="2024-01-06 10:00:00")
 
     resp = client.get("/bots/MyBot")
     body = resp.text
@@ -501,24 +505,28 @@ def test_bot_family_groups_matches_under_each_version(client, engine):
     assert body.index("<h3>MyBotV2</h3>") < body.index("<h3>MyBot</h3>")
 
 
-def test_bot_family_shows_empty_state_for_version_with_no_matches(client, engine):
-    db_insert_bot(engine, "Lonely", submitted_at="2024-01-01 10:00:00")
+async def test_bot_family_shows_empty_state_for_version_with_no_matches(
+    client, engine
+):
+    await db_insert_bot(engine, "Lonely", submitted_at="2024-01-01 10:00:00")
     resp = client.get("/bots/Lonely")
     assert "No matches yet" in resp.text
 
 
-def test_bot_family_intra_family_match_appears_under_both_versions(client, engine):
+async def test_bot_family_intra_family_match_appears_under_both_versions(
+    client, engine
+):
     """A match between V1 and V2 of the same family is shown under each
     version's section so the row appears twice on the page."""
-    v1 = db_insert_bot(engine, "MyBot", submitted_at="2024-01-01 10:00:00")
-    v2 = db_insert_bot(
+    v1 = await db_insert_bot(engine, "MyBot", submitted_at="2024-01-01 10:00:00")
+    v2 = await db_insert_bot(
         engine,
         "MyBot",
         submitted_at="2024-01-02 10:00:00",
         version=2,
         versioned_name="MyBotV2",
     )
-    db_insert_match(engine, v1, v2, winner_id=v2, result="o_wins")
+    await db_insert_match(engine, v1, v2, winner_id=v2, result="o_wins")
 
     resp = client.get("/bots/MyBot")
     body = resp.text
@@ -527,12 +535,12 @@ def test_bot_family_intra_family_match_appears_under_both_versions(client, engin
     assert body.count("MyBotV2 won") == 2
 
 
-def test_bot_family_self_match_appears_exactly_once(client, engine):
+async def test_bot_family_self_match_appears_exactly_once(client, engine):
     """A true self-pair (bot_x_id == bot_o_id) must NOT be double-counted
     under the bot's version section. Guards `group_matches_by_version` from
     regressing on the `m.bot_o != m.bot_x` dedup."""
-    foo = db_insert_bot(engine, "Foo")
-    match_id = db_insert_match(engine, foo, foo, winner_id=foo, result="x_wins")
+    foo = await db_insert_bot(engine, "Foo")
+    match_id = await db_insert_match(engine, foo, foo, winner_id=foo, result="x_wins")
 
     resp = client.get("/bots/Foo")
     body = resp.text
@@ -543,5 +551,3 @@ def test_bot_family_self_match_appears_exactly_once(client, engine):
         f"self-match should render once, but found {body.count(link)} "
         f"occurrences of {link!r}"
     )
-
-
