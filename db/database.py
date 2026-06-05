@@ -3,13 +3,21 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from sqlalchemy import Engine, create_engine, func, or_, select, text
+from sqlalchemy import (
+    Engine,
+    and_,
+    create_engine,
+    func,
+    or_,
+    select,
+)
 from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.orm import aliased
 from sqlalchemy.pool import NullPool
 
 from db.models.bot import Bot
@@ -136,106 +144,221 @@ async def list_bots(session: AsyncSession) -> list[Row[Any]]:
     return list(result.all())
 
 
-_LEADERBOARD_SQL = text(
-    """
-    WITH latest_per_family AS (
-        SELECT base_name, MAX(version) AS max_v
-        FROM bots
-        GROUP BY base_name
-    ),
-    latest_bot AS (
-        SELECT b.id, b.base_name, b.versioned_name, b.submitted_at
-        FROM bots b
-        JOIN latest_per_family l
-          ON l.base_name = b.base_name AND l.max_v = b.version
-    ),
-    stats AS (
-        SELECT
-            lb.base_name,
-            lb.versioned_name,
-            lb.submitted_at,
-            -- Stats for the current (latest) version only.
-            (SELECT COUNT(*) FROM matches m
-             WHERE m.winner_id = lb.id
-               AND m.result IN ('x_wins', 'o_wins')) AS clean_wins,
-            (SELECT COUNT(*) FROM matches m
-             WHERE m.winner_id = lb.id
-               AND m.result IN ('x_forfeit', 'o_forfeit')) AS forfeit_wins,
-            (SELECT COUNT(*) FROM matches m
-             WHERE (m.bot_x_id = lb.id OR m.bot_o_id = lb.id)
-               AND m.result = 'cat') AS draws,
-            (SELECT COUNT(*) FROM matches m
-             WHERE (m.bot_x_id = lb.id OR m.bot_o_id = lb.id)
-               AND m.result != 'cat'
-               AND (m.winner_id IS NULL OR m.winner_id != lb.id)) AS losses,
-            -- Lifetime W/L across every version of this family, excluding
-            -- intra-family matches so a family playing itself doesn't
-            -- inflate both sides.
-            (SELECT COUNT(*) FROM matches m
-             JOIN bots bx ON bx.id = m.bot_x_id
-             JOIN bots bo ON bo.id = m.bot_o_id
-             JOIN bots bw ON bw.id = m.winner_id
-             WHERE bw.base_name = lb.base_name
-               AND (bx.base_name != lb.base_name
-                    OR bo.base_name != lb.base_name)) AS lifetime_wins,
-            (SELECT COUNT(*) FROM matches m
-             JOIN bots bx ON bx.id = m.bot_x_id
-             JOIN bots bo ON bo.id = m.bot_o_id
-             WHERE m.result != 'cat'
-               AND (bx.base_name = lb.base_name
-                    OR bo.base_name = lb.base_name)
-               AND (bx.base_name != lb.base_name
-                    OR bo.base_name != lb.base_name)
-               AND (m.winner_id IS NULL
-                    OR NOT EXISTS (
-                        SELECT 1 FROM bots bw
-                        WHERE bw.id = m.winner_id
-                          AND bw.base_name = lb.base_name
-                    ))) AS lifetime_losses
-        FROM latest_bot lb
-    )
-    SELECT *
-    FROM stats
-    ORDER BY (clean_wins + forfeit_wins) DESC, submitted_at ASC
-    """
-)
-
-
 async def get_leaderboard(session: AsyncSession) -> list[Row[Any]]:
-    result = await session.execute(_LEADERBOARD_SQL)
+    # Mirror the original raw SQL's structure exactly: two CTEs (latest-version
+    # per family, then the actual latest-bot row) feeding six correlated COUNT
+    # subqueries. Aliased Bot copies stand in for the `bx`, `bo`, `bw` aliases
+    # in the original (Bot used twice in one query — once as the outer "this
+    # family's latest version", once as the joined opponent/winner row in the
+    # lifetime W/L subqueries).
+    latest_per_family = (
+        select(
+            Bot.base_name.label("base_name"),
+            func.max(Bot.version).label("max_v"),
+        )
+        .group_by(Bot.base_name)
+        .cte("latest_per_family")
+    )
+
+    latest_bot = (
+        select(
+            Bot.id.label("id"),
+            Bot.base_name.label("base_name"),
+            Bot.versioned_name.label("versioned_name"),
+            Bot.submitted_at.label("submitted_at"),
+        )
+        .join(
+            latest_per_family,
+            and_(
+                latest_per_family.c.base_name == Bot.base_name,
+                latest_per_family.c.max_v == Bot.version,
+            ),
+        )
+        .cte("latest_bot")
+    )
+
+    lb_id = latest_bot.c.id
+    lb_base = latest_bot.c.base_name
+
+    # Per-version stats (only the latest version of this family).
+    clean_wins = (
+        select(func.count())
+        .select_from(Match)
+        .where(
+            Match.winner_id == lb_id,
+            Match.result.in_(("x_wins", "o_wins")),
+        )
+        .scalar_subquery()
+    )
+    forfeit_wins = (
+        select(func.count())
+        .select_from(Match)
+        .where(
+            Match.winner_id == lb_id,
+            Match.result.in_(("x_forfeit", "o_forfeit")),
+        )
+        .scalar_subquery()
+    )
+    draws = (
+        select(func.count())
+        .select_from(Match)
+        .where(
+            or_(Match.bot_x_id == lb_id, Match.bot_o_id == lb_id),
+            Match.result == "cat",
+        )
+        .scalar_subquery()
+    )
+    losses = (
+        select(func.count())
+        .select_from(Match)
+        .where(
+            or_(Match.bot_x_id == lb_id, Match.bot_o_id == lb_id),
+            Match.result != "cat",
+            or_(Match.winner_id.is_(None), Match.winner_id != lb_id),
+        )
+        .scalar_subquery()
+    )
+
+    # Lifetime W/L across every version of the family, excluding pure
+    # intra-family matches so a family playing itself doesn't inflate both
+    # sides. `Bot` is aliased three ways (bx / bo / bw) so the joins are
+    # unambiguous in the generated SQL.
+    bx = aliased(Bot, name="bx")
+    bo = aliased(Bot, name="bo")
+    bw = aliased(Bot, name="bw")
+
+    lifetime_wins = (
+        select(func.count())
+        .select_from(Match)
+        .join(bx, bx.id == Match.bot_x_id)
+        .join(bo, bo.id == Match.bot_o_id)
+        .join(bw, bw.id == Match.winner_id)
+        .where(
+            bw.base_name == lb_base,
+            or_(bx.base_name != lb_base, bo.base_name != lb_base),
+        )
+        .scalar_subquery()
+    )
+
+    # The NOT EXISTS subquery: "the winner of this match does NOT belong to
+    # the current family." Implemented as a separate scalar subquery whose
+    # bots row is yet another alias (bw_inner) so it doesn't conflict with bw.
+    # `.correlate(latest_bot)` is required: this subquery is nested two levels
+    # deep (inside lifetime_losses, which itself is a subquery of the outer
+    # `SELECT FROM latest_bot`), and SQLAlchemy will only auto-correlate one
+    # level up. Without the explicit correlate, `latest_bot` would be added
+    # to the inner FROM clause and the NOT EXISTS would be uncorrelated.
+    bw_inner = aliased(Bot, name="bw_inner")
+    winner_not_in_family = ~(
+        select(1)
+        .select_from(bw_inner)
+        .where(
+            bw_inner.id == Match.winner_id,
+            bw_inner.base_name == lb_base,
+        )
+        .correlate(latest_bot, Match)
+        .exists()
+    )
+
+    lifetime_losses = (
+        select(func.count())
+        .select_from(Match)
+        .join(bx, bx.id == Match.bot_x_id)
+        .join(bo, bo.id == Match.bot_o_id)
+        .where(
+            Match.result != "cat",
+            or_(bx.base_name == lb_base, bo.base_name == lb_base),
+            or_(bx.base_name != lb_base, bo.base_name != lb_base),
+            or_(Match.winner_id.is_(None), winner_not_in_family),
+        )
+        .scalar_subquery()
+    )
+
+    stats = (
+        select(
+            latest_bot.c.base_name.label("base_name"),
+            latest_bot.c.versioned_name.label("versioned_name"),
+            latest_bot.c.submitted_at.label("submitted_at"),
+            clean_wins.label("clean_wins"),
+            forfeit_wins.label("forfeit_wins"),
+            draws.label("draws"),
+            losses.label("losses"),
+            lifetime_wins.label("lifetime_wins"),
+            lifetime_losses.label("lifetime_losses"),
+        )
+        .select_from(latest_bot)
+        .cte("stats")
+    )
+
+    stmt = select(stats).order_by(
+        (stats.c.clean_wins + stats.c.forfeit_wins).desc(),
+        stats.c.submitted_at.asc(),
+    )
+
+    result = await session.execute(stmt)
     return list(result.all())
-
-
-_BOT_FAMILY_SQL = text(
-    """
-    SELECT
-        b.versioned_name,
-        b.version,
-        b.submitted_at,
-        (SELECT COUNT(*) FROM matches m
-         WHERE m.winner_id = b.id
-           AND m.result IN ('x_wins', 'o_wins')) AS clean_wins,
-        (SELECT COUNT(*) FROM matches m
-         WHERE m.winner_id = b.id
-           AND m.result IN ('x_forfeit', 'o_forfeit')) AS forfeit_wins,
-        (SELECT COUNT(*) FROM matches m
-         WHERE (m.bot_x_id = b.id OR m.bot_o_id = b.id)
-           AND m.result = 'cat') AS draws,
-        (SELECT COUNT(*) FROM matches m
-         WHERE (m.bot_x_id = b.id OR m.bot_o_id = b.id)
-           AND m.result != 'cat'
-           AND (m.winner_id IS NULL OR m.winner_id != b.id)) AS losses
-    FROM bots b
-    WHERE b.base_name = :base_name
-    ORDER BY b.version DESC
-    """
-)
 
 
 async def get_bot_family(
     session: AsyncSession, base_name: str
 ) -> list[Row[Any]]:
-    result = await session.execute(_BOT_FAMILY_SQL, {"base_name": base_name})
+    # Four correlated COUNT(*) subqueries — one per per-version stat we need
+    # for the bot-family detail page. Each one filters `matches` against the
+    # outer `Bot.id`, which SQLAlchemy correlates automatically because we
+    # reference `Bot` columns inside the inner select.
+    clean_wins = (
+        select(func.count())
+        .select_from(Match)
+        .where(
+            Match.winner_id == Bot.id,
+            Match.result.in_(("x_wins", "o_wins")),
+        )
+        .scalar_subquery()
+    )
+    forfeit_wins = (
+        select(func.count())
+        .select_from(Match)
+        .where(
+            Match.winner_id == Bot.id,
+            Match.result.in_(("x_forfeit", "o_forfeit")),
+        )
+        .scalar_subquery()
+    )
+    draws = (
+        select(func.count())
+        .select_from(Match)
+        .where(
+            or_(Match.bot_x_id == Bot.id, Match.bot_o_id == Bot.id),
+            Match.result == "cat",
+        )
+        .scalar_subquery()
+    )
+    losses = (
+        select(func.count())
+        .select_from(Match)
+        .where(
+            or_(Match.bot_x_id == Bot.id, Match.bot_o_id == Bot.id),
+            Match.result != "cat",
+            or_(Match.winner_id.is_(None), Match.winner_id != Bot.id),
+        )
+        .scalar_subquery()
+    )
+
+    stmt = (
+        select(
+            Bot.versioned_name.label("versioned_name"),
+            Bot.version.label("version"),
+            Bot.submitted_at.label("submitted_at"),
+            clean_wins.label("clean_wins"),
+            forfeit_wins.label("forfeit_wins"),
+            draws.label("draws"),
+            losses.label("losses"),
+        )
+        .where(Bot.base_name == base_name)
+        .order_by(Bot.version.desc())
+    )
+
+    result = await session.execute(stmt)
     return list(result.all())
 
 
