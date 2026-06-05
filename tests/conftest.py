@@ -58,11 +58,14 @@ def _ensure_test_database_exists() -> None:
         f"{_BASE_URL}/{PG_ADMIN_DB}", isolation_level="AUTOCOMMIT"
     )
     with admin_engine.connect() as conn:
+        # Raw SQL: pg_database is a Postgres system catalog, not an ORM model.
         exists = conn.execute(
             text("SELECT 1 FROM pg_database WHERE datname = :n"),
             {"n": TEST_DB_NAME},
         ).first()
         if not exists:
+            # Raw SQL: CREATE DATABASE is dialect-specific DDL with no
+            # SQLAlchemy construct, and its name can't be parameter-bound.
             conn.execute(text(f'CREATE DATABASE "{TEST_DB_NAME}"'))
     admin_engine.dispose()
 
@@ -88,6 +91,9 @@ def engine() -> Iterator[Engine]:
     before each test so tests don't see each other's rows."""
     eng = create_engine(TEST_SYNC_URL)
     with eng.begin() as conn:
+        # Raw SQL: TRUNCATE is DDL with no ORM equivalent. The closest ORM
+        # form (three deletes) is slower, loses identity reset, and runs as
+        # multiple statements instead of one atomic op.
         conn.execute(
             text("TRUNCATE bots, matches, moves RESTART IDENTITY CASCADE")
         )

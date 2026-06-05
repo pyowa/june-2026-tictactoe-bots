@@ -3,10 +3,11 @@ import json
 from typing import Any
 
 import pytest
-from sqlalchemy import Engine, select, text
+from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
 from db.database import get_session, record_match
+from db.models.bot import Bot
 from db.models.match import Match
 from db.models.move import Move as MoveModel
 from runner.engine import MatchResult, Move
@@ -195,11 +196,9 @@ def _bound_db(engine: Engine) -> None:
 
 
 def _set_source(engine: Engine, bot_id: int, source: bytes) -> None:
-    with engine.begin() as conn:
-        conn.execute(
-            text("UPDATE bots SET source = :s WHERE id = :id"),
-            {"s": source, "id": bot_id},
-        )
+    with Session(engine) as session, session.begin():
+        bot = session.get(Bot, bot_id)
+        bot.source = source
 
 
 @pytest.mark.asyncio

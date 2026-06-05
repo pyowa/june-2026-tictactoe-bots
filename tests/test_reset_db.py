@@ -6,7 +6,8 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from sqlalchemy import Engine, create_engine, text
+from sqlalchemy import Engine, create_engine, func, select
+from sqlalchemy.orm import Session
 
 import db.database as d
 import scripts.reset_db as reset_db
@@ -218,15 +219,15 @@ def test_main_drops_tables_runs_alembic_and_purges_queues(
     main()
 
     # Tables really got dropped.
-    with engine.connect() as conn:
-        present = conn.execute(
-            text(
-                "SELECT to_regclass('public.bots'), "
-                "to_regclass('public.matches'), "
-                "to_regclass('public.moves'), "
-                "to_regclass('public.alembic_version')"
+    with Session(engine) as session:
+        present = session.execute(
+            select(
+                func.to_regclass("public.bots"),
+                func.to_regclass("public.matches"),
+                func.to_regclass("public.moves"),
+                func.to_regclass("public.alembic_version"),
             )
-        ).first()
+        ).one()
     assert present is not None
     assert all(v is None for v in present)
 

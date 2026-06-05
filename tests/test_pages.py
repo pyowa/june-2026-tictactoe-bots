@@ -238,18 +238,10 @@ def test_leaderboard_bot_name_links_to_bot_detail(client, engine):
 def test_leaderboard_shows_only_latest_version_per_family(client, engine):
     """When MyBot has V1 and V2, only V2 appears as a leaderboard row."""
     db_insert_bot(engine, "MyBot", submitted_at="2024-01-01 10:00:00")
-    # Manually insert a V2 since the helper assumes v1.
-    from sqlalchemy import text
-    with engine.begin() as conn:
-        conn.execute(
-            text(
-                """INSERT INTO bots
-                   (base_name, versioned_name, version, owner_token,
-                    python_version, submitted_at)
-                   VALUES ('MyBot', 'MyBotV2', 2, 'tok',
-                           '3', '2024-01-02 10:00:00')"""
-            )
-        )
+    db_insert_bot(
+        engine, "MyBot", versioned_name="MyBotV2", version=2,
+        submitted_at="2024-01-02 10:00:00",
+    )
 
     resp = client.get("/leaderboard")
     # MyBotV2 appears as the bot name; MyBot (V1) is not its own row.
