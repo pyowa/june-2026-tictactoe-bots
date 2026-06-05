@@ -188,7 +188,7 @@ Web, orchestrator, and the worker fleet all run as compose services alongside Po
 ```text
 tic-tac-toe-event/
 ├── web/            # FastAPI app (submission UI, leaderboard, matches)
-├── runner/         # orchestrator.py (game loop) + turn_worker.py (bot subprocess) + engine.py (pure board logic)
+├── runner/         # orchestrator.py + turn_worker.py (broker entrypoints) · dispatch.py (per-match handling) · match_loop.py (per-turn RPC loop) · bot_subprocess.py (bot tmpfile + subprocess) · engine.py (pure board logic)
 ├── db/             # SQLAlchemy models, async query helpers, bot source stored in `bots.source` BYTEA
 ├── messaging/      # Queue + RPC abstraction; RabbitMQ implementation
 ├── example_bots/   # Reference bots; `poe seed-examples` loads these into the DB

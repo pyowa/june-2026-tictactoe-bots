@@ -6,16 +6,14 @@ import pytest
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
+import runner.orchestrator  # noqa: F401  -- smoke-import the entrypoint module so coverage sees its top-level imports
 from db.database import get_session, record_match
 from db.models.bot import Bot
 from db.models.match import Match
 from db.models.move import Move as MoveModel
+from runner.dispatch import fetch_bot_sources, handle_match_message
 from runner.engine import MatchResult, Move
-from runner.orchestrator import (
-    fetch_bot_sources,
-    handle_match_message,
-    play_match_rpc,
-)
+from runner.match_loop import play_match_rpc
 from tests.conftest import TEST_ASYNC_URL, db_insert_bot
 
 

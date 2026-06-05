@@ -24,7 +24,7 @@ Every piece of hand-written SQL in the codebase. Generated 2026-06-04.
 A note on what isn't here: SQLAlchemy Core/ORM expressions (`select(Bot).where(...)`, `Bot.__table__.alias(...)`, etc.) aren't catalogued — those are SQL *constructed* by the library and already type-check against the model classes. Examples that exist in this codebase but were skipped:
 
 - `db/database.py` — `get_owner_token`, `get_next_version`, `insert_bot` (via `session.add`), `record_match` (via `session.add` for both `Match` and `Move`), `list_bots`, `_match_select`/`list_matches`/`get_match`, `get_moves` (full `select(...).join(...).where(...).order_by(...)` chains)
-- `runner/orchestrator.py:118` — `select(Bot.id, Bot.source).where(Bot.id.in_([...]))`
+- `runner/dispatch.py:19` — `select(Bot.id, Bot.source).where(Bot.id.in_([...]))`
 - `web/utils.py:137` — `select(Bot.id, Bot.python_version)`
 - `web/submit.py:118` — `select(Bot.id).where(Bot.versioned_name == name)`
 

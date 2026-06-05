@@ -2,7 +2,8 @@ import base64
 import json
 import textwrap
 
-from runner.turn_worker import handle_turn, run_bot_subprocess
+import runner.turn_worker  # noqa: F401  -- smoke-import the entrypoint module so coverage sees its top-level imports
+from runner.bot_subprocess import handle_turn, run_bot_subprocess
 
 # ---------------------------------------------------------------------------
 # run_bot_subprocess — actually invokes Python on a tmpfile.
@@ -72,7 +73,7 @@ def test_run_bot_subprocess_cleans_up_tmpfile_after_run() -> None:
         captured_paths.append(handle.name)
         return handle
 
-    with patch("runner.turn_worker.tempfile.NamedTemporaryFile", capturing_factory):
+    with patch("runner.bot_subprocess.tempfile.NamedTemporaryFile", capturing_factory):
         run_bot_subprocess(SIMPLE_BOT, "X", ".|.|.\n.|.|.\n.|.|.")
 
     assert captured_paths, "expected NamedTemporaryFile to be called"
@@ -88,7 +89,7 @@ def test_run_bot_subprocess_catches_unexpected_exception() -> None:
     def boom(*args, **kwargs):
         raise OSError("no such file or directory")
 
-    with patch("runner.turn_worker.subprocess.run", side_effect=boom):
+    with patch("runner.bot_subprocess.subprocess.run", side_effect=boom):
         response = run_bot_subprocess(b"# whatever", "X", ".|.|.\n.|.|.\n.|.|.")
     assert response["board"] is None
     assert "runtime error" in (response["error"] or "")
