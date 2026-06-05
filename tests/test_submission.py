@@ -142,16 +142,17 @@ def test_malformed_cookie_is_ignored(client):
 
 def test_python_version_defaults_when_omitted(client, engine):
     """Omitted `python:` field → defaults to the latest supported version."""
-    from sqlalchemy import text
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
 
+    from db.models.bot import Bot
     from web.utils import DEFAULT_PYTHON_VERSION
     resp = upload(client, "MyBot")
     assert "submitted successfully" in resp.text
-    with engine.connect() as conn:
-        row = conn.execute(
-            text("SELECT python_version FROM bots WHERE versioned_name = 'MyBot'")
-        ).first()
-    assert row is not None
+    with Session(engine) as session:
+        row = session.execute(
+            select(Bot.python_version).where(Bot.versioned_name == "MyBot")
+        ).one()
     assert row[0] == DEFAULT_PYTHON_VERSION
 
 
@@ -159,14 +160,17 @@ def test_python_version_defaults_when_omitted(client, engine):
 def test_python_version_supported_versions_accepted(
     client, engine, version: str
 ) -> None:
-    from sqlalchemy import text
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
+
+    from db.models.bot import Bot
     slug = version.replace(".", "_")
     body = f'"""\nname: V{slug}\npython: {version}\n"""\nimport sys\n'.encode()
     resp = client.post("/submit", files={"file": ("bot.py", body, "text/plain")})
     assert "submitted successfully" in resp.text
-    with engine.connect() as conn:
-        row = conn.execute(
-            text("SELECT python_version FROM bots WHERE base_name LIKE 'V%' LIMIT 1")
+    with Session(engine) as session:
+        row = session.execute(
+            select(Bot.python_version).where(Bot.base_name.like("V%")).limit(1)
         ).first()
     assert row is not None
     assert row[0] == version
@@ -282,29 +286,33 @@ def test_parse_cookie_returns_empty_dict_on_invalid_json() -> None:
 
 
 def test_upload_stores_source_bytes_in_db(client, engine):
-    from sqlalchemy import text
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
+
+    from db.models.bot import Bot
     upload(client, "MyBot", extra="x = 42  # source marker\n")
-    with engine.connect() as conn:
-        row = conn.execute(
-            text("SELECT source FROM bots WHERE versioned_name = 'MyBot'")
-        ).first()
-    assert row is not None
+    with Session(engine) as session:
+        row = session.execute(
+            select(Bot.source).where(Bot.versioned_name == "MyBot")
+        ).one()
     stored = bytes(row[0])
     assert b"name: MyBot" in stored
     assert b"x = 42  # source marker" in stored
 
 
 def test_resubmit_stores_each_version_separately_in_db(client, engine):
-    from sqlalchemy import text
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
+
+    from db.models.bot import Bot
     upload(client, "MyBot", extra="# v1 marker\n")
     upload(client, "MyBot", extra="# v2 marker\n")
-    with engine.connect() as conn:
-        rows = conn.execute(
-            text(
-                "SELECT versioned_name, source FROM bots "
-                "WHERE base_name = 'MyBot' ORDER BY version"
-            )
-        ).fetchall()
+    with Session(engine) as session:
+        rows = session.execute(
+            select(Bot.versioned_name, Bot.source)
+            .where(Bot.base_name == "MyBot")
+            .order_by(Bot.version)
+        ).all()
     assert len(rows) == 2
     assert rows[0].versioned_name == "MyBot"
     assert rows[1].versioned_name == "MyBotV2"

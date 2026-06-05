@@ -1,10 +1,12 @@
 from pathlib import Path
 
 import pytest
-from sqlalchemy import Engine, text
+from sqlalchemy import Engine, func, select
+from sqlalchemy.orm import Session
 
 import db.database as d
 import scripts.seed_example_bots as seed
+from db.models.bot import Bot
 from scripts.seed_example_bots import enqueue_all_pairs, main
 from tests.conftest import TEST_ASYNC_URL, _RecordingQueue, db_insert_bot
 
@@ -81,13 +83,15 @@ def test_main_inserts_bots_and_enqueues_match_jobs(
 
     main()
 
-    with engine.connect() as conn:
-        rows = conn.execute(
-            text(
-                "SELECT base_name, versioned_name, version, python_version "
-                "FROM bots ORDER BY base_name"
-            )
-        ).fetchall()
+    with Session(engine) as session:
+        rows = session.execute(
+            select(
+                Bot.base_name,
+                Bot.versioned_name,
+                Bot.version,
+                Bot.python_version,
+            ).order_by(Bot.base_name)
+        ).all()
 
     # Both bots inserted with v1 and the expected python_version.
     assert len(rows) == 2
@@ -124,13 +128,12 @@ def test_main_auto_versions_duplicate_names(
 
     main()
 
-    with engine.connect() as conn:
-        rows = conn.execute(
-            text(
-                "SELECT versioned_name, version FROM bots "
-                "WHERE base_name = 'Foo' ORDER BY version"
-            )
-        ).fetchall()
+    with Session(engine) as session:
+        rows = session.execute(
+            select(Bot.versioned_name, Bot.version)
+            .where(Bot.base_name == "Foo")
+            .order_by(Bot.version)
+        ).all()
     assert [(r[0], r[1]) for r in rows] == [("Foo", 1), ("FooV2", 2)]
 
 
@@ -154,10 +157,10 @@ def test_main_skips_files_without_name_field(
     assert "Skipping nameless.py" in out
     assert "no 'name:' field" in out
 
-    with engine.connect() as conn:
+    with Session(engine) as session:
         names = [
             r[0]
-            for r in conn.execute(text("SELECT base_name FROM bots")).fetchall()
+            for r in session.execute(select(Bot.base_name)).all()
         ]
     assert names == ["Good"]
     # Only one bot inserted -> 1*1 = 1 match job.
@@ -180,13 +183,10 @@ def test_main_falls_back_to_python_3_when_version_unsupported(
 
     main()
 
-    with engine.connect() as conn:
-        row = conn.execute(
-            text(
-                "SELECT python_version FROM bots WHERE base_name = 'Weird'"
-            )
-        ).first()
-    assert row is not None
+    with Session(engine) as session:
+        row = session.execute(
+            select(Bot.python_version).where(Bot.base_name == "Weird")
+        ).one()
     assert row[0] == "3"
 
 
@@ -206,7 +206,9 @@ def test_main_with_empty_directory_prints_and_returns(
     out = capsys.readouterr().out
     assert "No .py files found" in out
 
-    with engine.connect() as conn:
-        count = conn.execute(text("SELECT COUNT(*) FROM bots")).scalar()
+    with Session(engine) as session:
+        count = session.execute(
+            select(func.count()).select_from(Bot)
+        ).scalar()
     assert count == 0
     assert mock_queue.messages == []

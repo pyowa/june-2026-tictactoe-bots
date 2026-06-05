@@ -3,9 +3,12 @@ import json
 from typing import Any
 
 import pytest
-from sqlalchemy import Engine, text
+from sqlalchemy import Engine, select, text
+from sqlalchemy.orm import Session
 
 from db.database import get_session, record_match
+from db.models.match import Match
+from db.models.move import Move as MoveModel
 from runner.engine import MatchResult, Move
 from runner.orchestrator import (
     fetch_bot_sources,
@@ -13,6 +16,16 @@ from runner.orchestrator import (
     play_match_rpc,
 )
 from tests.conftest import TEST_ASYNC_URL, db_insert_bot
+
+
+def _read_match_row(engine: Engine) -> tuple[str, int | None]:
+    """Read (result, winner_id) for the single match row in the test DB.
+
+    All call sites in this module insert exactly one match per test, so a
+    bare `select(...).one()` is sufficient — no `match_id` filter needed."""
+    with Session(engine) as session:
+        row = session.execute(select(Match.result, Match.winner_id)).one()
+        return row.result, row.winner_id
 
 
 class _ScriptedRpc:
@@ -225,11 +238,9 @@ async def test_handle_match_message_persists_o_winning_result(
         {"bot_x_id": a, "bot_o_id": b, "python_version": "3"}
     ).encode()
     await handle_match_message(rpc, body)
-    with engine.connect() as conn:
-        row = conn.execute(text("SELECT result, winner_id FROM matches")).first()
-    assert row is not None
-    assert row[0] == "o_wins"
-    assert row[1] == b
+    result_value, winner_id = _read_match_row(engine)
+    assert result_value == "o_wins"
+    assert winner_id == b
 
 
 async def test_handle_match_message_persists_cat_result(
@@ -257,11 +268,9 @@ async def test_handle_match_message_persists_cat_result(
         {"bot_x_id": a, "bot_o_id": b, "python_version": "3"}
     ).encode()
     await handle_match_message(rpc, body)
-    with engine.connect() as conn:
-        row = conn.execute(text("SELECT result, winner_id FROM matches")).first()
-    assert row is not None
-    assert row[0] == "cat"
-    assert row[1] is None
+    result_value, winner_id = _read_match_row(engine)
+    assert result_value == "cat"
+    assert winner_id is None
 
 
 async def test_handle_match_message_persists_result(
@@ -287,23 +296,21 @@ async def test_handle_match_message_persists_result(
     result = await handle_match_message(rpc, body)
     assert result.result == "x_wins"
 
-    with engine.connect() as conn:
-        row = conn.execute(
-            text("SELECT result, winner_id FROM matches")
-        ).first()
-        # Each persisted Move row's bot_id must agree with its player symbol:
-        # X moves are owned by bot_x, O moves by bot_o. Pair them up rather
-        # than just counting rows so a flipped mapping in `record_match` is
-        # caught.
-        move_rows = conn.execute(
-            text(
-                "SELECT move_number, bot_id, board_state FROM moves "
-                "ORDER BY move_number"
-            )
+    result_value, winner_id = _read_match_row(engine)
+    # Each persisted Move row's bot_id must agree with its player symbol:
+    # X moves are owned by bot_x, O moves by bot_o. Pair them up rather
+    # than just counting rows so a flipped mapping in `record_match` is
+    # caught.
+    with Session(engine) as session:
+        move_rows = session.execute(
+            select(
+                MoveModel.move_number,
+                MoveModel.bot_id,
+                MoveModel.board_state,
+            ).order_by(MoveModel.move_number)
         ).all()
-    assert row is not None
-    assert row[0] == "x_wins"
-    assert row[1] == a
+    assert result_value == "x_wins"
+    assert winner_id == a
 
     # Odd-numbered moves (1, 3, 5) are X turns; even-numbered (2, 4) are O.
     assert len(move_rows) == 5
@@ -341,13 +348,9 @@ async def test_record_match_x_forfeit_credits_o_as_winner(
     async with get_session() as session:
         await record_match(session, bot_x_id, bot_o_id, result)
 
-    with engine.connect() as conn:
-        row = conn.execute(
-            text("SELECT result, winner_id FROM matches")
-        ).first()
-    assert row is not None
-    assert row[0] == "x_forfeit"
-    assert row[1] == bot_o_id
+    result_value, winner_id = _read_match_row(engine)
+    assert result_value == "x_forfeit"
+    assert winner_id == bot_o_id
 
 
 async def test_record_match_o_forfeit_credits_x_as_winner(
@@ -367,10 +370,6 @@ async def test_record_match_o_forfeit_credits_x_as_winner(
     async with get_session() as session:
         await record_match(session, bot_x_id, bot_o_id, result)
 
-    with engine.connect() as conn:
-        row = conn.execute(
-            text("SELECT result, winner_id FROM matches")
-        ).first()
-    assert row is not None
-    assert row[0] == "o_forfeit"
-    assert row[1] == bot_x_id
+    result_value, winner_id = _read_match_row(engine)
+    assert result_value == "o_forfeit"
+    assert winner_id == bot_x_id
