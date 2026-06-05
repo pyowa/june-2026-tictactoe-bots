@@ -134,10 +134,9 @@ async def enqueue_match_pairs(
     """Enqueue one MatchJob per unplayed pair involving the newly inserted
     bot. Includes the self-pair (`new` vs `new`). The chosen Python version
     is `max(new, other)` so older bots run on newer interpreters."""
-    result = await session.execute(select(Bot.id, Bot.python_version))
-    rows = result.all()
-    for other_id, other_py in rows:
-        py = pick_python_version(new_python_version, other_py)
-        await queue.enqueue_match(MatchJob(new_bot_id, other_id, py))
-        if other_id != new_bot_id:
-            await queue.enqueue_match(MatchJob(other_id, new_bot_id, py))
+    bots = (await session.scalars(select(Bot))).all()
+    for other in bots:
+        py = pick_python_version(new_python_version, other.python_version)
+        await queue.enqueue_match(MatchJob(new_bot_id, other.id, py))
+        if other.id != new_bot_id:
+            await queue.enqueue_match(MatchJob(other.id, new_bot_id, py))
