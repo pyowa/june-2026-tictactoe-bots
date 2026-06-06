@@ -35,6 +35,7 @@ dev = [
     # connection for CREATE DATABASE before the async machinery comes up).
     # The runtime app is async-only.
     "psycopg2-binary",
+    "mutmut>=3.5.0",
 ]
 
 [tool.poe.tasks]
@@ -45,6 +46,7 @@ format       = "ruff format ."
 typecheck    = "ty check web/ db/ entities/ runner/ messaging/ scripts/ tests/"
 seed-examples = "python -m scripts.seed_example_bots"
 reset-db     = "python -m scripts.reset_db"
+mutate       = "mutmut run"
 
 [tool.poe.tasks.check]
 sequence = ["lint", "lint-md", "typecheck", "test"]
@@ -84,3 +86,16 @@ exclude_lines = [
 # MD013: line length — disabled because we use long prose lines; editors and
 # GitHub reflow them automatically and hard-wrapping makes diffs noisy.
 plugins.md013.enabled = false
+
+[tool.mutmut]
+# mutmut v3 reads paths_to_mutate from this section. The CLI flag
+# `--paths-to-mutate` was removed in v3, so this is the only place to set it.
+paths_to_mutate = [
+    "entities/",
+    "db/",
+    "runner/",
+    "web/",
+    "messaging/",
+    "scripts/",
+]
+tests_dir = ["tests/"]

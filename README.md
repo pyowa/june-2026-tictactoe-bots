@@ -213,6 +213,7 @@ Stack: FastAPI · SQLAlchemy 2.x (async, `asyncpg`) on Postgres · RabbitMQ (`ai
 | `uv run poe format` | Auto-format with ruff |
 | `uv run poe typecheck` | Type-check with ty |
 | `uv run poe check` | Run lint + lint-md + typecheck + test in sequence |
+| `uv run poe mutate` | Mutation testing via mutmut — slow (~30-60 min); not part of `poe check`. Run before releases or as an occasional coverage gut-check. |
 
 ### Changing the schema
 

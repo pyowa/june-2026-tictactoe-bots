@@ -18,3 +18,8 @@ bots/*
 
 # uv
 .uv/
+
+# mutmut
+.mutmut-cache
+.mutmut-cache.lock
+mutants/
