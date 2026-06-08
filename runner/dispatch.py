@@ -8,8 +8,9 @@ import json
 from db.session import get_session
 from entities.bot.repository import BotRepository
 from entities.match.repository import MatchRepository
+from messaging.rpc_client import RpcCaller
 from runner.engine import MatchResult
-from runner.match_loop import RpcCaller, play_match_rpc
+from runner.match_loop import play_match_rpc
 
 
 async def fetch_bot_sources(bot_x_id: int, bot_o_id: int) -> tuple[bytes, bytes]:

@@ -6,10 +6,19 @@ per pending call when the matching reply lands.
 
 import asyncio
 import uuid
-from typing import Self
+from typing import Protocol, Self
 
 import aio_pika
 from aio_pika.abc import AbstractChannel, AbstractIncomingMessage
+
+
+class RpcCaller(Protocol):
+    """Broker-agnostic interface for making RPC calls. Satisfied by `RpcClient`
+    and by test fakes (`_ScriptedRpc`, `_TimeoutRpc`, etc.)."""
+
+    async def call(
+        self, target_queue: str, payload: bytes, timeout: float = ...
+    ) -> bytes: ...
 
 
 class RpcClient:

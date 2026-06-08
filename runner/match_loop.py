@@ -7,9 +7,9 @@ Takes any `RpcCaller`, so it's broker-agnostic and fully unit-testable.
 import base64
 import json
 import os
-from typing import Protocol
 
 from messaging.routing import turn_queue_for
+from messaging.rpc_client import RpcCaller
 from runner.engine import (
     EMPTY_BOARD,
     Board,
@@ -22,12 +22,6 @@ from runner.engine import (
 )
 
 TURN_TIMEOUT = float(os.environ.get("TURN_TIMEOUT", "10"))
-
-
-class RpcCaller(Protocol):
-    async def call(
-        self, target_queue: str, payload: bytes, timeout: float = ...
-    ) -> bytes: ...
 
 
 class _BotForfeit(Exception):

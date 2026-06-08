@@ -1,5 +1,8 @@
 import os
 
+import aio_pika
+
+from messaging.connection import BrokerConnection, RabbitMQBrokerConnection
 from messaging.rabbitmq import RabbitMQQueue
 
 DEFAULT_BROKER_URL = "amqp://guest:guest@localhost:5672/"
@@ -12,3 +15,11 @@ def make_queue() -> RabbitMQQueue:
     can `close()` it at shutdown. Construction is cheap — the AMQP connection
     opens lazily on first publish."""
     return RabbitMQQueue(BROKER_URL)
+
+
+async def make_connection() -> BrokerConnection:  # pragma: no cover
+    """Open a RabbitMQ connection and return a broker-agnostic wrapper.
+    Called once per process at startup; the connection is long-lived."""
+    connection = await aio_pika.connect_robust(BROKER_URL)
+    channel = await connection.channel()
+    return RabbitMQBrokerConnection(connection, channel)
