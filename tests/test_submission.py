@@ -1,3 +1,4 @@
+import html
 import json
 import urllib.parse
 
@@ -5,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
+from structlog.testing import capture_logs
 
 import web.main
 from entities.bot.model import Bot
@@ -158,13 +160,16 @@ def test_malformed_cookie_is_ignored(client):
 async def test_python_version_defaults_when_omitted(client, engine):
     """Omitted `python:` field → defaults to the latest supported version."""
     from web.utils import DEFAULT_PYTHON_VERSION
+
     resp = upload(client, "MyBot")
     assert "submitted successfully" in resp.text
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
-        row = (await session.execute(
-            select(Bot.python_version).where(Bot.versioned_name == "MyBot")
-        )).one()
+        row = (
+            await session.execute(
+                select(Bot.python_version).where(Bot.versioned_name == "MyBot")
+            )
+        ).one()
     assert row[0] == DEFAULT_PYTHON_VERSION
 
 
@@ -178,9 +183,11 @@ async def test_python_version_supported_versions_accepted(
     assert "submitted successfully" in resp.text
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
-        row = (await session.execute(
-            select(Bot.python_version).where(Bot.base_name.like("V%")).limit(1)
-        )).first()
+        row = (
+            await session.execute(
+                select(Bot.python_version).where(Bot.base_name.like("V%")).limit(1)
+            )
+        ).first()
     assert row is not None
     assert row[0] == version
 
@@ -188,14 +195,14 @@ async def test_python_version_supported_versions_accepted(
 @pytest.mark.parametrize(
     "version",
     [
-        "3",       # bare major — ambiguous, rejected
-        "3.9",     # too old
-        "3.15",    # not yet supported
-        "4.0",     # not a real Python
-        "2.7",     # not supported
+        "3",  # bare major — ambiguous, rejected
+        "3.9",  # too old
+        "3.15",  # not yet supported
+        "4.0",  # not a real Python
+        "2.7",  # not supported
         "latest",  # not a version string
         "3.11.4",  # patch-level not supported
-        "",        # empty
+        "",  # empty
     ],
 )
 def test_python_version_unsupported_versions_rejected(client, version: str) -> None:
@@ -228,6 +235,7 @@ def test_extract_python_version_first_node_not_expr() -> None:
 
 def test_extract_python_version_no_python_field_returns_default() -> None:
     from web.utils import DEFAULT_PYTHON_VERSION
+
     source = '"""\nname: MyBot\n"""\nimport sys\n'
     assert extract_python_version(source) == DEFAULT_PYTHON_VERSION
 
@@ -275,6 +283,7 @@ def test_extract_bot_name_returns_name_when_present() -> None:
 
 def test_default_python_version_pins_to_last_supported() -> None:
     from web.utils import DEFAULT_PYTHON_VERSION, SUPPORTED_PYTHON_VERSIONS
+
     assert DEFAULT_PYTHON_VERSION == SUPPORTED_PYTHON_VERSIONS[-1]
     assert DEFAULT_PYTHON_VERSION == "3.14"
 
@@ -286,6 +295,7 @@ def test_default_python_version_pins_to_last_supported() -> None:
 
 def test_parse_cookie_returns_empty_dict_on_invalid_json() -> None:
     from web.utils import parse_cookie
+
     assert parse_cookie("not-json") == {}
 
 
@@ -298,9 +308,11 @@ async def test_upload_stores_source_bytes_in_db(client, engine):
     upload(client, "MyBot", extra="x = 42  # source marker\n")
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
-        row = (await session.execute(
-            select(Bot.source).where(Bot.versioned_name == "MyBot")
-        )).one()
+        row = (
+            await session.execute(
+                select(Bot.source).where(Bot.versioned_name == "MyBot")
+            )
+        ).one()
     stored = bytes(row[0])
     assert b"name: MyBot" in stored
     assert b"x = 42  # source marker" in stored
@@ -311,11 +323,13 @@ async def test_resubmit_stores_each_version_separately_in_db(client, engine):
     upload(client, "MyBot", extra="# v2 marker\n")
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
-        rows = (await session.execute(
-            select(Bot.versioned_name, Bot.source)
-            .where(Bot.base_name == "MyBot")
-            .order_by(Bot.version)
-        )).all()
+        rows = (
+            await session.execute(
+                select(Bot.versioned_name, Bot.source)
+                .where(Bot.base_name == "MyBot")
+                .order_by(Bot.version)
+            )
+        ).all()
     assert len(rows) == 2
     assert rows[0].versioned_name == "MyBot"
     assert rows[1].versioned_name == "MyBotV2"
@@ -328,8 +342,20 @@ async def test_resubmit_stores_each_version_separately_in_db(client, engine):
 # ---------------------------------------------------------------------------
 
 
+def test_upload_logs_bot_uploaded_event(client, mock_queue) -> None:
+    with capture_logs() as cap:
+        upload(client, "LogBot")
+    uploaded = [e for e in cap if e["event"] == "bot_uploaded"]
+    assert len(uploaded) == 1
+    assert uploaded[0]["bot_name"] == "LogBot"
+    assert uploaded[0]["jobs_enqueued"] == 1
+    assert "bot_id" in uploaded[0]
+    assert "python_version" in uploaded[0]
+
+
 def test_first_upload_enqueues_only_self_pair(client, mock_queue):
     from web.utils import DEFAULT_PYTHON_VERSION
+
     upload(client, "Solo")
     assert len(mock_queue.messages) == 1
     job = mock_queue.messages[0]
@@ -339,7 +365,7 @@ def test_first_upload_enqueues_only_self_pair(client, mock_queue):
 
 def test_second_upload_enqueues_three_jobs(client, mock_queue):
     """With two bots in the DB, a new upload should produce:
-       self-pair + (new vs existing) + (existing vs new) = 3 messages."""
+    self-pair + (new vs existing) + (existing vs new) = 3 messages."""
     upload(client, "Alpha")
     mock_queue.messages.clear()  # ignore Alpha's own self-pair
     upload(client, "Beta")
@@ -379,3 +405,200 @@ def test_enqueue_picks_higher_python_version(client, mock_queue):
     assert cross, "expected at least one cross-pair message"
     for m in cross:
         assert m.python_version == "3.13"
+
+
+# ---------------------------------------------------------------------------
+# _SubmissionError — base class wiring
+# ---------------------------------------------------------------------------
+
+
+def test_submission_error_str_repr_equals_message() -> None:
+    """_SubmissionError must pass message to super().__init__ so str(exc) works."""
+    from web.submit import _SubmissionError
+
+    exc = _SubmissionError("test message")
+    assert exc.args == ("test message",)
+    assert str(exc) == "test message"
+
+
+# ---------------------------------------------------------------------------
+# Source decoding — errors="replace" must be present
+# ---------------------------------------------------------------------------
+
+
+def test_invalid_utf8_source_decoded_with_replacement_not_raised(client) -> None:
+    """Bytes that aren't valid UTF-8 must be decoded with U+FFFD, not raise.
+    If errors='replace' is dropped, decode() uses strict mode and raises
+    UnicodeDecodeError, crashing the handler.
+    The invalid bytes must be inside a string literal so the resulting Python
+    source (with replacement chars) is still syntactically valid."""
+    source = b'"""\nname: BadBytes\n"""\nx = "bad\xff\xfe"\n'
+    resp = client.post("/submit", files={"file": ("bot.py", source, "text/plain")})
+    assert "submitted successfully" in resp.text
+
+
+# ---------------------------------------------------------------------------
+# Exact error message text — kills string-mangling / case mutants
+# ---------------------------------------------------------------------------
+
+
+def test_missing_name_error_message_exact(client) -> None:
+    source = b'"""This bot has no name field."""\nimport sys\n'
+    resp = client.post("/submit", files={"file": ("bot.py", source, "text/plain")})
+    # Jinja2 HTML-escapes the message; unescape before comparing.
+    # The banner element renders as: <div class="banner banner-error">MESSAGE</div>
+    # Mutations that wrap the message string with "XX...XX" produce ">XXYour bot..."
+    # instead of ">Your bot...", so we anchor the check to the element boundary.
+    text = html.unescape(resp.text)
+    assert 'banner-error">Your bot must start with a docstring' in text
+
+
+def test_reserved_name_error_message_exact(client) -> None:
+    resp = upload(client, "FooV9")
+    # The reserved-name message ends with "which is reserved for auto-versioning..."
+    # Mutations that wrap "reserved for auto-versioning" with "XX" produce
+    # "which is XXreserved..." — checking the fixed prefix "which is reserved"
+    # pins the exact word boundary.
+    text = html.unescape(resp.text)
+    assert "which is reserved for auto-versioning. Pick a different name." in text
+
+
+def test_invalid_python_version_error_message_exact(client) -> None:
+    source = b'"""\nname: MyBot\npython: 3.9\n"""\nimport sys\n'
+    resp = client.post("/submit", files={"file": ("bot.py", source, "text/plain")})
+    # Same anchoring strategy: include the element-open boundary for the first
+    # string, and the sentence boundary ("docstring. Use") for the second.
+    text = html.unescape(resp.text)
+    assert "banner-error\">Invalid 'python:' value in docstring." in text
+    assert "docstring. Use a version like '3', '3.11', or '3.12'." in text
+
+
+# ---------------------------------------------------------------------------
+# Structured log — exact field values
+# ---------------------------------------------------------------------------
+
+
+def test_upload_logs_exact_bot_id_and_python_version(client, mock_queue) -> None:
+    """bot_id and python_version must be logged with their actual values."""
+    from web.utils import DEFAULT_PYTHON_VERSION
+
+    with capture_logs() as cap:
+        upload(client, "TypedBot")
+    event = next(e for e in cap if e["event"] == "bot_uploaded")
+    assert isinstance(event["bot_id"], int)
+    assert event["bot_id"] > 0
+    assert event["python_version"] == DEFAULT_PYTHON_VERSION
+
+
+# ---------------------------------------------------------------------------
+# Success response — listing and name are forwarded to the template
+# ---------------------------------------------------------------------------
+
+
+def test_success_response_renders_previously_submitted_bots(client) -> None:
+    """The success page must include bots already in the DB, proving
+    list_for_homepage() was called and passed as the 'bots' context key."""
+    upload(client, "Alpha")
+    resp = upload(client, "Beta")
+    assert resp.status_code == 200
+    text = html.unescape(resp.text)
+    assert "'Beta' submitted successfully!" in text
+    # Alpha must appear in the listing — proves bots.list_for_homepage()
+    # was fetched and forwarded (not replaced with None).
+    assert "Alpha" in text
+
+
+# ---------------------------------------------------------------------------
+# encode_cookie — safe="" must encode forward slash
+# ---------------------------------------------------------------------------
+
+
+def test_encode_cookie_percent_encodes_forward_slash() -> None:
+    """safe='' ensures '/' is percent-encoded; the default safe='/' would
+    leave it raw, which can confuse cookie parsers."""
+    from web.utils import encode_cookie
+
+    result = encode_cookie({"A/B": "token"})
+    assert "/" not in result
+    assert "%2F" in result.upper()
+
+
+# ---------------------------------------------------------------------------
+# enqueue_match_pairs — correlation_id length and return count
+# ---------------------------------------------------------------------------
+
+
+def test_correlation_id_in_enqueued_jobs_is_32_hex_chars(client, mock_queue) -> None:
+    """All MatchJob correlation_ids — including reverse-pair jobs — must be
+    exactly 32 hex chars (token_hex(16) = 16 bytes × 2 chars/byte).
+    token_hex(None) gives 64 chars; token_hex(17) gives 34 chars; None gives
+    an error. Two-bot upload exercises the reverse-pair branch."""
+    upload(client, "CorrBot")
+    upload(client, "AnotherBot")  # triggers reverse-pair jobs (other.id != new_bot_id)
+    for job in mock_queue.messages:
+        assert job.correlation_id is not None
+        assert len(job.correlation_id) == 32, (
+            f"correlation_id {job.correlation_id!r} has length "
+            f"{len(job.correlation_id)}, expected 32"
+        )
+        assert all(c in "0123456789abcdef" for c in job.correlation_id)
+
+
+def test_enqueue_match_pairs_logs_correct_count_for_two_bots(
+    client, mock_queue
+) -> None:
+    """Second upload: 3 jobs (self + both directions with existing bot).
+    The logged jobs_enqueued must equal 3 — kills count arithmetic mutants."""
+    upload(client, "Alpha")
+    with capture_logs() as cap:
+        upload(client, "Beta")
+    event = next(e for e in cap if e["event"] == "bot_uploaded")
+    assert event["jobs_enqueued"] == 3
+
+
+# ---------------------------------------------------------------------------
+# extract_bot_name — off-by-one in slice (stripped[5:] vs stripped[6:])
+# ---------------------------------------------------------------------------
+
+
+def test_extract_bot_name_no_space_after_colon() -> None:
+    """'name:A' (no space) must return 'A', not None.
+
+    With stripped[6:] the result is '' → None; with the correct stripped[5:]
+    it's 'A'. This test can't be caught with 'name: A' because the leading
+    space is stripped away in both cases."""
+    source = '"""\nname:A\n"""\nimport sys\n'
+    assert extract_bot_name(source) == "A"
+
+
+# ---------------------------------------------------------------------------
+# extract_python_version — correct slice index
+# ---------------------------------------------------------------------------
+
+
+def test_extract_python_version_no_space_after_colon() -> None:
+    """'python:3.12' (no space) must return '3.12', not None.
+
+    stripped[7:] of 'python:3.12' = '3.12'; stripped[8:] = '.12'
+    which is not in SUPPORTED_PYTHON_VERSIONS and returns None. The test
+    with 'python: 3.12' would give stripped[7:] = ' 3.12' → strip → '3.12'
+    and stripped[8:] = '3.12' → same result — can't detect the off-by-one."""
+    from web.utils import SUPPORTED_PYTHON_VERSIONS, extract_python_version
+
+    latest = SUPPORTED_PYTHON_VERSIONS[-1]
+    source = f'"""\nname: Bot\npython:{latest}\n"""\nimport sys\n'
+    assert extract_python_version(source) == latest
+
+
+# ---------------------------------------------------------------------------
+# _success_response — samesite cookie attribute
+# ---------------------------------------------------------------------------
+
+
+def test_success_response_sets_samesite_lax_cookie(client, mock_queue) -> None:
+    """The ownership cookie must be set with samesite=lax.
+    Dropping samesite would use the browser's default (often 'None' which
+    requires Secure) or leave CSRF exposure."""
+    resp = upload(client, "SameSiteBot")
+    set_cookie = resp.headers.get("set-cookie", "")
+    assert "samesite=lax" in set_cookie.lower()

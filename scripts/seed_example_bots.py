@@ -36,7 +36,7 @@ async def enqueue_all_pairs(bots: BotRepository, queue: Queue) -> int:
     for x in all_bots:
         for o in all_bots:
             py = pick_python_version(x.python_version, o.python_version)
-            await queue.enqueue_match(MatchJob(x.id, o.id, py))
+            await queue.enqueue_match(MatchJob(x.id, o.id, py, secrets.token_hex(16)))
             count += 1
     return count
 

@@ -1,11 +1,22 @@
 import pytest
+from bs4 import BeautifulSoup
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
+from entities.bot.repository import BotRepository
 from tests.conftest import (
     db_insert_bot,
     db_insert_match,
     db_insert_move,
     upload,
 )
+
+
+async def _leaderboard(engine: AsyncEngine) -> dict:
+    """Call BotRepository.leaderboard() and return rows keyed by base_name."""
+    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+        rows = await BotRepository(session).leaderboard()
+    return {r.base_name: r for r in rows}
+
 
 BOARD_START = ".|.|.\n.|.|.\n.|.|."
 BOARD_AFTER_X = "X|.|.\n.|.|.\n.|.|."
@@ -47,12 +58,8 @@ async def test_leaderboard_orders_by_wins_descending(client, engine):
 
 
 async def test_leaderboard_tie_broken_by_earlier_submission(client, engine):
-    early = await db_insert_bot(
-        engine, "EarlyBot", submitted_at="2024-01-01 00:00:00"
-    )
-    late = await db_insert_bot(
-        engine, "LateBot", submitted_at="2024-06-01 00:00:00"
-    )
+    early = await db_insert_bot(engine, "EarlyBot", submitted_at="2024-01-01 00:00:00")
+    late = await db_insert_bot(engine, "LateBot", submitted_at="2024-06-01 00:00:00")
     # Give each one win so they're tied
     await db_insert_match(engine, early, late, winner_id=early, result="x_wins")
     await db_insert_match(engine, late, early, winner_id=late, result="x_wins")
@@ -83,12 +90,13 @@ async def test_leaderboard_forfeit_win_shown_separately(client, engine):
     await db_insert_match(engine, a, b, winner_id=a, result="o_forfeit")
 
     resp = client.get("/leaderboard")
-    text = resp.text
-    bot_a_pos = text.index("GoodBot")
-    row_section = text[bot_a_pos : bot_a_pos + 400]
+    soup = BeautifulSoup(resp.text, "html.parser")
+    row = soup.find("tr", {"data-bot": "GoodBot"})
+    assert row is not None
+    cells = row.find_all("td")
     # 1 clean win and 1 forfeit win, each in their own cell
-    assert ">1<" in row_section
-    assert row_section.count(">1<") == 2
+    assert cells[2].text == "1"
+    assert cells[3].text == "1"
 
 
 async def test_leaderboard_forfeit_win_ranks_above_zero_wins(client, engine):
@@ -111,6 +119,191 @@ async def test_leaderboard_draw_not_counted_as_win(client, engine):
     draw_pos = text.index("DrawBot")
     row_section = text[draw_pos : draw_pos + 300]
     assert ">0<" in row_section
+
+
+# ---------------------------------------------------------------------------
+# Leaderboard — repository-level count assertions (mutation-killing)
+#
+# The HTML-level tests above verify ordering and rough rendering. These tests
+# call BotRepository.leaderboard() directly and assert exact column values so
+# that mutations to individual WHERE-clause literals and OR branches are caught.
+# ---------------------------------------------------------------------------
+
+
+async def test_leaderboard_clean_wins_counts_x_wins_and_o_wins(engine) -> None:
+    """clean_wins.in_(('x_wins', 'o_wins')) — dropping either literal silently
+    misses one win type. WinBot wins once as X, once as O → clean_wins == 2.
+    LoseBot never wins → clean_wins == 0 (kills winner_id == lb_id → !=)."""
+    winner = await db_insert_bot(engine, "WinBot")
+    loser = await db_insert_bot(engine, "LoseBot")
+    await db_insert_match(engine, winner, loser, winner_id=winner, result="x_wins")
+    await db_insert_match(engine, loser, winner, winner_id=winner, result="o_wins")
+
+    lb = await _leaderboard(engine)
+    assert lb["WinBot"].clean_wins == 2
+    assert lb["LoseBot"].clean_wins == 0
+
+
+async def test_leaderboard_forfeit_wins_counts_x_forfeit(engine) -> None:
+    """forfeit_wins.in_(('x_forfeit', 'o_forfeit')) — dropping 'x_forfeit'
+    misses wins where the opponent forfeited as X."""
+    winner = await db_insert_bot(engine, "WinBot")
+    forfeiter = await db_insert_bot(engine, "ForfeitBot")
+    # forfeiter plays X and forfeits → winner (O) gets the forfeit win
+    await db_insert_match(
+        engine, forfeiter, winner, winner_id=winner, result="x_forfeit"
+    )
+
+    lb = await _leaderboard(engine)
+    assert lb["WinBot"].forfeit_wins == 1
+    assert lb["ForfeitBot"].forfeit_wins == 0
+
+
+async def test_leaderboard_forfeit_wins_counts_o_forfeit(engine) -> None:
+    """forfeit_wins.in_(('x_forfeit', 'o_forfeit')) — dropping 'o_forfeit'
+    misses wins where the opponent forfeited as O."""
+    winner = await db_insert_bot(engine, "WinBot")
+    forfeiter = await db_insert_bot(engine, "ForfeitBot")
+    # forfeiter plays O and forfeits → winner (X) gets the forfeit win
+    await db_insert_match(
+        engine, winner, forfeiter, winner_id=winner, result="o_forfeit"
+    )
+
+    lb = await _leaderboard(engine)
+    assert lb["WinBot"].forfeit_wins == 1
+    assert lb["ForfeitBot"].forfeit_wins == 0
+
+
+async def test_leaderboard_draws_counted_as_x_and_as_o(engine) -> None:
+    """draws or_(bot_x_id == lb_id, bot_o_id == lb_id) — dropping either branch
+    misses draws where the family plays the other role. DrawBot draws once as X
+    and once as O → draws == 2."""
+    draw_bot = await db_insert_bot(engine, "DrawBot")
+    other_a = await db_insert_bot(engine, "OtherA")
+    other_b = await db_insert_bot(engine, "OtherB")
+    await db_insert_match(engine, draw_bot, other_a, winner_id=None, result="cat")
+    await db_insert_match(engine, other_b, draw_bot, winner_id=None, result="cat")
+
+    lb = await _leaderboard(engine)
+    assert lb["DrawBot"].draws == 2
+
+
+async def test_leaderboard_draws_excludes_wins(engine) -> None:
+    """draws result == 'cat' can flip to != — a clean win must not appear as a
+    draw."""
+    a = await db_insert_bot(engine, "WinBot")
+    b = await db_insert_bot(engine, "LoseBot")
+    await db_insert_match(engine, a, b, winner_id=a, result="x_wins")
+
+    lb = await _leaderboard(engine)
+    assert lb["WinBot"].draws == 0
+    assert lb["LoseBot"].draws == 0
+
+
+async def test_leaderboard_losses_counted_as_x_and_as_o(engine) -> None:
+    """losses or_(bot_x_id == lb_id, bot_o_id == lb_id) — dropping either branch
+    misses losses where the family plays the other role. LoseBot loses once as X
+    and once as O → losses == 2."""
+    lose_bot = await db_insert_bot(engine, "LoseBot")
+    win_a = await db_insert_bot(engine, "WinA")
+    win_b = await db_insert_bot(engine, "WinB")
+    await db_insert_match(engine, lose_bot, win_a, winner_id=win_a, result="o_wins")
+    await db_insert_match(engine, win_b, lose_bot, winner_id=win_b, result="x_wins")
+
+    lb = await _leaderboard(engine)
+    assert lb["LoseBot"].losses == 2
+
+
+async def test_leaderboard_losses_excludes_draws(engine) -> None:
+    """losses result != 'cat' can flip to == — a draw must not count as a loss."""
+    a = await db_insert_bot(engine, "DrawBot")
+    b = await db_insert_bot(engine, "OtherBot")
+    await db_insert_match(engine, a, b, winner_id=None, result="cat")
+
+    lb = await _leaderboard(engine)
+    assert lb["DrawBot"].losses == 0
+    assert lb["OtherBot"].losses == 0
+
+
+async def test_leaderboard_losses_counts_forfeit_loss(engine) -> None:
+    """losses or_(winner_id.is_(None), winner_id != lb_id) — a forfeit where
+    the opponent is recorded as winner must count as a loss (winner_id != lb_id
+    branch). Also verifies the winner's losses stay at 0."""
+    loser = await db_insert_bot(engine, "LoseBot")
+    winner = await db_insert_bot(engine, "WinBot")
+    # loser forfeits as X; winner (O) is recorded as winner_id
+    await db_insert_match(engine, loser, winner, winner_id=winner, result="x_forfeit")
+
+    lb = await _leaderboard(engine)
+    assert lb["LoseBot"].losses == 1
+    assert lb["WinBot"].losses == 0
+
+
+async def test_leaderboard_lifetime_wins_counts_all_versions(engine) -> None:
+    """lifetime_wins bw.base_name == lb_base — mutating to != would credit the
+    wrong family. FooV1 and FooV2 each win one match vs External → lifetime_wins
+    == 2 for Foo, 0 for External."""
+    foo_v1 = await db_insert_bot(engine, "Foo", version=1, versioned_name="Foo")
+    foo_v2 = await db_insert_bot(engine, "Foo", version=2, versioned_name="FooV2")
+    ext = await db_insert_bot(engine, "External")
+    await db_insert_match(engine, foo_v1, ext, winner_id=foo_v1, result="x_wins")
+    await db_insert_match(engine, ext, foo_v2, winner_id=foo_v2, result="o_wins")
+
+    lb = await _leaderboard(engine)
+    assert lb["Foo"].lifetime_wins == 2
+    assert lb["External"].lifetime_wins == 0
+
+
+async def test_leaderboard_lifetime_wins_excludes_intra_family(engine) -> None:
+    """lifetime_wins or_(bx.base_name != lb_base, bo.base_name != lb_base)
+    filters out matches where both bots belong to the same family — an
+    intra-family win must not inflate lifetime_wins."""
+    foo_v1 = await db_insert_bot(engine, "Foo", version=1, versioned_name="Foo")
+    foo_v2 = await db_insert_bot(engine, "Foo", version=2, versioned_name="FooV2")
+    await db_insert_match(engine, foo_v1, foo_v2, winner_id=foo_v1, result="x_wins")
+
+    lb = await _leaderboard(engine)
+    assert lb["Foo"].lifetime_wins == 0
+
+
+async def test_leaderboard_lifetime_losses_counts_all_versions(engine) -> None:
+    """lifetime_losses bw_inner.base_name == lb_base in the NOT EXISTS — mutating
+    to != inverts the filter and miscounts. FooV1 loses as X, FooV2 loses as O
+    → lifetime_losses == 2 for Foo, 0 for External."""
+    foo_v1 = await db_insert_bot(engine, "Foo", version=1, versioned_name="Foo")
+    foo_v2 = await db_insert_bot(engine, "Foo", version=2, versioned_name="FooV2")
+    ext = await db_insert_bot(engine, "External")
+    await db_insert_match(engine, foo_v1, ext, winner_id=ext, result="o_wins")
+    await db_insert_match(engine, ext, foo_v2, winner_id=ext, result="x_wins")
+
+    lb = await _leaderboard(engine)
+    assert lb["Foo"].lifetime_losses == 2
+    assert lb["External"].lifetime_losses == 0
+
+
+async def test_leaderboard_lifetime_losses_excludes_intra_family(engine) -> None:
+    """lifetime_losses or_(bx.base_name != lb_base, bo.base_name != lb_base)
+    filters intra-family matches — a family cannot lose to itself."""
+    foo_v1 = await db_insert_bot(engine, "Foo", version=1, versioned_name="Foo")
+    foo_v2 = await db_insert_bot(engine, "Foo", version=2, versioned_name="FooV2")
+    await db_insert_match(engine, foo_v1, foo_v2, winner_id=foo_v1, result="x_wins")
+
+    lb = await _leaderboard(engine)
+    assert lb["Foo"].lifetime_losses == 0
+
+
+async def test_leaderboard_lifetime_losses_counted_as_x_and_as_o(engine) -> None:
+    """lifetime_losses or_(bx.base_name == lb_base, bo.base_name == lb_base) —
+    dropping either branch misses losses where the family plays the other role.
+    FooBot loses once as X, once as O → lifetime_losses == 2."""
+    foo = await db_insert_bot(engine, "Foo")
+    ext_a = await db_insert_bot(engine, "ExtA")
+    ext_b = await db_insert_bot(engine, "ExtB")
+    await db_insert_match(engine, foo, ext_a, winner_id=ext_a, result="o_wins")
+    await db_insert_match(engine, ext_b, foo, winner_id=ext_b, result="x_wins")
+
+    lb = await _leaderboard(engine)
+    assert lb["Foo"].lifetime_losses == 2
 
 
 # ---------------------------------------------------------------------------
@@ -243,14 +436,17 @@ async def test_leaderboard_shows_only_latest_version_per_family(client, engine):
     """When MyBot has V1 and V2, only V2 appears as a leaderboard row."""
     await db_insert_bot(engine, "MyBot", submitted_at="2024-01-01 10:00:00")
     await db_insert_bot(
-        engine, "MyBot", versioned_name="MyBotV2", version=2,
+        engine,
+        "MyBot",
+        versioned_name="MyBotV2",
+        version=2,
         submitted_at="2024-01-02 10:00:00",
     )
 
     resp = client.get("/leaderboard")
     # MyBotV2 appears as the bot name; MyBot (V1) is not its own row.
     assert ">MyBotV2<" in resp.text
-    assert "<a href=\"/bots/MyBot\">MyBotV2</a>" in resp.text
+    assert '<a href="/bots/MyBot">MyBotV2</a>' in resp.text
 
 
 async def test_leaderboard_shows_lifetime_column(client, engine):
@@ -261,8 +457,8 @@ async def test_leaderboard_shows_lifetime_column(client, engine):
     resp = client.get("/leaderboard")
     assert "Lifetime" in resp.text
     # AlphaBot's lifetime row should show 1-0; BetaBot's should show 0-1.
-    assert "1&ndash;0" in resp.text
-    assert "0&ndash;1" in resp.text
+    assert "1-0" in resp.text
+    assert "0-1" in resp.text
 
 
 # ---------------------------------------------------------------------------
@@ -378,7 +574,8 @@ async def test_match_detail_back_link_to_matches(client, engine):
     match_id = await db_insert_match(engine, a, b, winner_id=None, result="cat")
 
     resp = client.get(f"/matches/{match_id}")
-    assert 'href="/matches"' in resp.text
+    # Anchor to &larr; which only appears in the back-link, not in the nav bar
+    assert 'href="/matches">&larr;' in resp.text
     assert "Back to matches" in resp.text
 
 
@@ -436,7 +633,7 @@ async def test_bot_detail_links_to_nested_match_url(client, engine):
     match_id = await db_insert_match(engine, a, b, winner_id=a, result="x_wins")
 
     resp = client.get("/bots/BotA")
-    assert f'/bots/BotA/matches/{match_id}' in resp.text
+    assert f"/bots/BotA/matches/{match_id}" in resp.text
 
 
 # ---------------------------------------------------------------------------
@@ -491,10 +688,22 @@ async def test_bot_family_groups_matches_under_each_version(client, engine):
     other = await db_insert_bot(engine, "OtherBot")
 
     # V1 plays Other (V1 wins); V2 plays Other (Other wins).
-    await db_insert_match(engine, v1, other, winner_id=v1, result="x_wins",
-                          played_at="2024-01-05 10:00:00")
-    await db_insert_match(engine, v2, other, winner_id=other, result="o_wins",
-                          played_at="2024-01-06 10:00:00")
+    await db_insert_match(
+        engine,
+        v1,
+        other,
+        winner_id=v1,
+        result="x_wins",
+        played_at="2024-01-05 10:00:00",
+    )
+    await db_insert_match(
+        engine,
+        v2,
+        other,
+        winner_id=other,
+        result="o_wins",
+        played_at="2024-01-06 10:00:00",
+    )
 
     resp = client.get("/bots/MyBot")
     body = resp.text
@@ -505,9 +714,7 @@ async def test_bot_family_groups_matches_under_each_version(client, engine):
     assert body.index("<h3>MyBotV2</h3>") < body.index("<h3>MyBot</h3>")
 
 
-async def test_bot_family_shows_empty_state_for_version_with_no_matches(
-    client, engine
-):
+async def test_bot_family_shows_empty_state_for_version_with_no_matches(client, engine):
     await db_insert_bot(engine, "Lonely", submitted_at="2024-01-01 10:00:00")
     resp = client.get("/bots/Lonely")
     assert "No matches yet" in resp.text
@@ -551,3 +758,59 @@ async def test_bot_family_self_match_appears_exactly_once(client, engine):
         f"self-match should render once, but found {body.count(link)} "
         f"occurrences of {link!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# not_found — context dict and status code must both be correct
+# ---------------------------------------------------------------------------
+
+
+def test_not_found_returns_404_status(client) -> None:
+    """not_found() must return 404 — guards against context=None or {} dropped
+    from TemplateResponse causing a rendering crash that returns 500."""
+    resp = client.get("/bots/DoesNotExist")
+    assert resp.status_code == 404
+
+
+def test_not_found_renders_template_without_error(client) -> None:
+    """The 404 template must render successfully — context={} must not be
+    passed as None (which would crash Jinja2)."""
+    resp = client.get("/matches/99999")
+    assert resp.status_code == 404
+    assert len(resp.text) > 0
+
+
+# ---------------------------------------------------------------------------
+# render_index_response — "bots" context key must be exactly "bots"
+# ---------------------------------------------------------------------------
+
+
+def test_error_response_renders_index_page_successfully(client) -> None:
+    """Submission error must return 200 with the index template rendered.
+    If the 'bots' context key is renamed, Jinja2 renders the bots loop as
+    empty/undefined — the test catches any crash (which would return 500)."""
+    resp = client.post(
+        "/submit",
+        files={"file": ("bot.py", b"import sys\n", "text/plain")},
+    )
+    assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# match_detail — back_url context key must be exactly "back_url"
+# ---------------------------------------------------------------------------
+
+
+async def test_match_detail_back_url_is_accessible_in_template(client, engine) -> None:
+    """The 'back_url' context key must reach the template by its exact name.
+    Renaming it to 'XXback_urlXX' or 'BACK_URL' renders href="" instead of
+    href="/matches". base.html always has href="/matches" in the nav, so we
+    anchor the check to the &larr; arrow that's unique to the back-link."""
+    a = await db_insert_bot(engine, "BotA")
+    b = await db_insert_bot(engine, "BotB")
+    match_id = await db_insert_match(engine, a, b, winner_id=a, result="x_wins")
+
+    resp = client.get(f"/matches/{match_id}")
+    # &larr; appears only in the back-link <a>, not in the nav. If back_url
+    # is undefined, the rendered href is "" and this check fails.
+    assert 'href="/matches">&larr;' in resp.text

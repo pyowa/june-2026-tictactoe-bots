@@ -8,6 +8,8 @@ import base64
 import json
 import os
 
+import structlog
+
 from messaging.routing import turn_queue_for
 from messaging.rpc_client import RpcCaller
 from runner.engine import (
@@ -22,6 +24,8 @@ from runner.engine import (
 )
 
 TURN_TIMEOUT = float(os.environ.get("TURN_TIMEOUT", "10"))
+
+_log = structlog.get_logger()
 
 
 class _BotForfeit(Exception):
@@ -45,6 +49,8 @@ async def _request_turn(
     symbol: str,
     board: Board,
     source: bytes,
+    correlation_id: str,
+    move_number: int,
 ) -> Board:
     """One turn round-trip: send the request, validate the reply, return
     the new board. Raises `_BotForfeit` on timeout, worker-reported error,
@@ -53,9 +59,19 @@ async def _request_turn(
         {
             "symbol": symbol,
             "board": board_to_str(board),
-            "source_b64": base64.b64encode(source).decode("ascii"),
+            "source_b64": base64.b64encode(source).decode("ascii"),  # pragma: no mutate
+            "correlation_id": correlation_id,
+            "move_number": move_number,
         }
     ).encode()
+
+    _log.info(
+        "turn_request",
+        correlation_id=correlation_id,
+        move_number=move_number,
+        symbol=symbol,
+        queue=queue_name,
+    )
 
     try:
         response_bytes = await rpc.call(queue_name, payload, timeout=timeout)
@@ -70,9 +86,7 @@ async def _request_turn(
 
     new_board = parse_board(new_board_text)
     if new_board is None:
-        raise _BotForfeit(
-            f"invalid output: unparseable board: {new_board_text!r}"
-        )
+        raise _BotForfeit(f"invalid output: unparseable board: {new_board_text!r}")
 
     move_error = validate_move(board, new_board, symbol)
     if move_error:
@@ -86,6 +100,7 @@ async def play_match_rpc(
     bot_x_source: bytes,
     bot_o_source: bytes,
     python_version: str,
+    correlation_id: str,
     timeout: float = TURN_TIMEOUT,
 ) -> MatchResult:
     """Play one match by RPC-ing each turn to the right per-version queue."""
@@ -103,14 +118,34 @@ async def play_match_rpc(
             move_number += 1
             try:
                 board = await _request_turn(
-                    rpc, queue_name, timeout, symbol, board, source
+                    rpc,
+                    queue_name,
+                    timeout,
+                    symbol,
+                    board,
+                    source,
+                    correlation_id,
+                    move_number,
                 )
             except _BotForfeit as forfeit:
+                _log.info(
+                    "turn_result",
+                    correlation_id=correlation_id,
+                    move_number=move_number,
+                    outcome="forfeit",
+                    error=forfeit.error,
+                )
                 moves.append(
                     Move(move_number, player, board_to_str(board), forfeit.error)
                 )
                 return MatchResult(_forfeit_label(player), moves)
 
+            _log.info(
+                "turn_result",
+                correlation_id=correlation_id,
+                move_number=move_number,
+                outcome="valid",
+            )
             moves.append(Move(move_number, player, board_to_str(board)))
             outcome = check_winner(board)
             if outcome:

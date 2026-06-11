@@ -33,6 +33,6 @@ class RabbitMQQueue:
         )
         await channel.default_exchange.publish(message, routing_key=MATCHES_QUEUE)
 
-    async def close(self) -> None:  # pragma: no cover
+    async def close(self) -> None:
         if self._connection is not None and not self._connection.is_closed:
             await self._connection.close()

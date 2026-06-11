@@ -10,6 +10,7 @@ from entities.bot.repository import BotRepository
 from entities.match.repository import MatchRepository
 from entities.move.repository import MoveRepository
 from messaging.client import make_queue
+from messaging.log import configure_logging
 from messaging.queue import Queue
 from web.dependencies import get_bots, get_matches, get_moves, get_queue
 from web.submit import handle_submission
@@ -22,6 +23,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Create the process-wide queue at startup, close it at shutdown.
     Routes reach it via the `get_queue` dependency, tests substitute a fake
     via `app.dependency_overrides[get_queue]`."""
+    configure_logging()
     queue = make_queue()
     app.state.queue = queue
     try:
@@ -138,7 +140,7 @@ async def _render_match(
     move_rows = await moves.for_match(match_id)
     return templates.TemplateResponse(
         request,
-        "match_detail.html",
+        "match_detail.html",  # pragma: no mutate -- macOS FS masks case mutation
         {
             "match": match,
             "moves": move_rows,

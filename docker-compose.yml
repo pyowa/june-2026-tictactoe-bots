@@ -194,5 +194,42 @@ services:
       <<: *worker-env
       WORKER_PYTHON_VERSION: "3.14"
 
+  # Mutation testing via mutmut. Only starts when explicitly requested:
+  #   docker compose --profile mutmut run --rm mutmut
+  # Depends on `db` (session test hits a real DB) and `migrate` (needs the
+  # schema). No RabbitMQ dependency — tests mock the broker.
+  mutmut:
+    profiles: [mutmut]
+    build:
+      context: .
+      target: test-runner
+      args:
+        PY_VERSION: "3.13"
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      PGUSER: ttt
+      PGPASSWORD: ttt
+      PGDATABASE: ttt
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - ./web:/app/web
+      - ./runner:/app/runner
+      - ./db:/app/db
+      - ./entities:/app/entities
+      - ./messaging:/app/messaging
+      - ./scripts:/app/scripts
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+      - ./tests:/app/tests
+      - ./pyproject.toml:/app/pyproject.toml
+      - ./mutants:/app/mutants
+    command: ["uv", "run", "mutmut", "run", "--max-children", "1"]
+    restart: "no"
+
 volumes:
   ttt-pgdata:

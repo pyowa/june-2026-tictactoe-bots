@@ -2,6 +2,8 @@ import base64
 import json
 import textwrap
 
+from structlog.testing import capture_logs
+
 import runner.turn_worker  # noqa: F401  -- smoke-import the entrypoint module so coverage sees its top-level imports
 from runner.bot_subprocess import handle_turn, run_bot_subprocess
 
@@ -118,3 +120,88 @@ async def test_handle_turn_returns_worker_error_on_bad_payload() -> None:
     response = json.loads(await handle_turn(b"{not valid json"))
     assert response["board"] is None
     assert "worker error" in response["error"]
+
+
+async def test_handle_turn_logs_turn_handled_on_success() -> None:
+    body = json.dumps(
+        {
+            "symbol": "X",
+            "board": ".|.|.\n.|.|.\n.|.|.",
+            "source_b64": base64.b64encode(SIMPLE_BOT).decode("ascii"),
+            "correlation_id": "cid-abc",
+            "move_number": 3,
+        }
+    ).encode()
+    with capture_logs() as cap:
+        await handle_turn(body)
+    assert cap == [
+        {
+            "event": "turn_handled",
+            "correlation_id": "cid-abc",
+            "move_number": 3,
+            "outcome": "success",
+            "log_level": "info",
+        }
+    ]
+
+
+async def test_handle_turn_defaults_correlation_id_to_empty_string() -> None:
+    """Payload without correlation_id must log correlation_id == ""."""
+    body = json.dumps(
+        {
+            "symbol": "X",
+            "board": ".|.|.\n.|.|.\n.|.|.",
+            "source_b64": base64.b64encode(SIMPLE_BOT).decode("ascii"),
+        }
+    ).encode()
+    with capture_logs() as cap:
+        await handle_turn(body)
+    assert cap[0]["correlation_id"] == ""
+
+
+async def test_handle_turn_defaults_move_number_to_zero() -> None:
+    """Payload without move_number must log move_number == 0."""
+    body = json.dumps(
+        {
+            "symbol": "X",
+            "board": ".|.|.\n.|.|.\n.|.|.",
+            "source_b64": base64.b64encode(SIMPLE_BOT).decode("ascii"),
+        }
+    ).encode()
+    with capture_logs() as cap:
+        await handle_turn(body)
+    assert cap[0]["move_number"] == 0
+
+
+async def test_handle_turn_uses_initial_sentinel_defaults_on_early_exception() -> None:
+    """When b64 decode fails before .get() assignments, initial "" and 0 are used."""
+    body = json.dumps(
+        {
+            "symbol": "X",
+            "board": ".|.|.\n.|.|.\n.|.|.",
+            "source_b64": "!!!not-valid-base64!!!",
+        }
+    ).encode()
+    with capture_logs() as cap:
+        await handle_turn(body)
+    assert cap[0]["correlation_id"] == ""
+    assert cap[0]["move_number"] == 0
+
+
+async def test_handle_turn_logs_error_outcome_on_bot_failure() -> None:
+    body = json.dumps(
+        {
+            "symbol": "X",
+            "board": ".|.|.\n.|.|.\n.|.|.",
+            "source_b64": base64.b64encode(b"import sys\nsys.exit(1)\n").decode(
+                "ascii"
+            ),
+            "correlation_id": "cid-def",
+            "move_number": 2,
+        }
+    ).encode()
+    with capture_logs() as cap:
+        await handle_turn(body)
+    assert cap[0]["event"] == "turn_handled"
+    assert cap[0]["outcome"] == "error"
+    assert cap[0]["correlation_id"] == "cid-def"

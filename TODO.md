@@ -86,6 +86,17 @@ These items come from a manual mutation-testing audit: 144 candidate mutations a
 
 Most of Tier A is concentrated in the leaderboard CTE — the six correlated COUNT subqueries (clean wins, forfeit wins, draws, losses, lifetime wins, lifetime losses) are all currently asserted only via aggregated totals or via "non-zero" smoke checks. Pinning roughly six explicit COUNT values across the existing leaderboard tests (one match per category, asserting the exact integer count on both the winner and the loser's row) would close most of Tier A in a single session.
 
+### Acceptance test — remaining mutmut survivors (top priority)
+
+These mutants survived the latest run against `entities/bot/repository.py`. Fix them before moving on to Tier A.
+
+- [ ] **mutmut_46** — drops `latest_per_family.c.max_v == Bot.version` from the `latest_bot` join, so all versions appear in the leaderboard instead of only the latest. Fix: assert that Alpha v1 does NOT appear as a separate row in the leaderboard (only `AlphaV2` should appear for the Alpha family).
+- [ ] **mutmut_196** — drops `or_(bx.base_name == lb_base, bo.base_name == lb_base)` participation filter from `lifetime_losses`, so every non-cat match in the DB is counted as a loss for every family. Fix: add a bot with `lifetime_losses=0` alongside families that have real losses, and assert `lifetime_losses == 0` remains correct when the filter is removed by mutation.
+- [ ] **mutmut_197** — drops `or_(bx.base_name != lb_base, bo.base_name != lb_base)` intra-family exclusion from `lifetime_losses`. Fix: add an Alpha v1 vs Alpha v2 match and assert it does NOT inflate `lifetime_losses` for the Alpha family.
+- [ ] **mutmut_226 / mutmut_228** — drop `Match.winner_id.is_(None)` from the `lifetime_losses` OR condition. Fix: add a null-winner non-cat match (if possible given the schema) or document that this branch is unreachable and mark with `# pragma: no mutate`.
+- [ ] **mutmut_284** — secondary `ORDER BY submitted_at ASC` dropped. Fix: give two bots with equal wins different `submitted_at` timestamps and assert the earlier-submitted bot appears first.
+- [ ] **mutmut_2, 15, 45, 50, 82, 113, 115** — survivors with no diff shown; need individual investigation via `mutmut show` to determine if they are equivalent or true gaps.
+
 ### Tier A — silent data-bug risks
 
 - [ ] **`entities/bot/repository.py:131`** — leaderboard `clean_wins` `Match.result.in_(("x_wins", "o_wins"))` can have either literal dropped silently. Fix: add a leaderboard test that records one `x_wins` match and one `o_wins` match for the same family and assert `clean_wins == 2` on that row (and `== 0` on opponents).

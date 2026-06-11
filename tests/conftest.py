@@ -66,9 +66,7 @@ def _ensure_test_database_exists() -> None:
     This stays sync (psycopg2) because it runs once, at session start, before
     the async engine is bound — bootstrapping the test database itself can't
     use the async session factory that *targets* that database."""
-    admin_engine = create_engine(
-        _TEST_ADMIN_SYNC_URL, isolation_level="AUTOCOMMIT"
-    )
+    admin_engine = create_engine(_TEST_ADMIN_SYNC_URL, isolation_level="AUTOCOMMIT")
     with admin_engine.connect() as conn:
         # Raw SQL: pg_database is a Postgres system catalog, not an ORM model.
         exists = conn.execute(

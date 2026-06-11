@@ -66,5 +66,5 @@ class RpcClient:
         try:
             return await asyncio.wait_for(future, timeout=timeout)
         except TimeoutError:
-            self._pending.pop(correlation_id, None)
+            self._pending.pop(correlation_id, None)  # pragma: no mutate -- race guard
             raise

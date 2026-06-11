@@ -54,3 +54,11 @@ CMD ["python", "-m", "runner.orchestrator"]
 # ---------------------------------------------------------------------------
 FROM base AS worker
 CMD ["python", "-m", "runner.turn_worker"]
+
+# ---------------------------------------------------------------------------
+# test-runner: like base but with dev deps (pytest, mutmut, etc.). Used by
+# the `mutmut` compose service so mutation runs happen on Linux where fork
+# is safe (mutmut v3 hardcodes os.fork(), which crashes on macOS + py3.14).
+# ---------------------------------------------------------------------------
+FROM base AS test-runner
+RUN uv sync --frozen --no-install-project

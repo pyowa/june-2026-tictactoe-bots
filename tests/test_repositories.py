@@ -21,9 +21,7 @@ async def _bound_db(engine: AsyncEngine) -> AsyncIterator[None]:
     yield
 
 
-async def test_bot_by_id_returns_match(
-    engine: AsyncEngine, _bound_db: None
-) -> None:
+async def test_bot_by_id_returns_match(engine: AsyncEngine, _bound_db: None) -> None:
     bot_id = await db_insert_bot(engine, "FindMe")
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
@@ -44,9 +42,7 @@ async def test_bot_by_id_returns_none_for_missing(
 async def test_bot_by_versioned_name_returns_match(
     engine: AsyncEngine, _bound_db: None
 ) -> None:
-    await db_insert_bot(
-        engine, "Family", version=2, versioned_name="FamilyV2"
-    )
+    await db_insert_bot(engine, "Family", version=2, versioned_name="FamilyV2")
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
         found = await BotRepository(session).by_versioned_name("FamilyV2")

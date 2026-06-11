@@ -9,6 +9,7 @@ class MatchJob:
     bot_x_id: int
     bot_o_id: int
     python_version: str
+    correlation_id: str
 
 
 class Queue(Protocol):

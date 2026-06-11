@@ -213,7 +213,21 @@ Stack: FastAPI · SQLAlchemy 2.x (async, `asyncpg`) on Postgres · RabbitMQ (`ai
 | `uv run poe format` | Auto-format with ruff |
 | `uv run poe typecheck` | Type-check with ty |
 | `uv run poe check` | Run lint + lint-md + typecheck + test in sequence |
-| `uv run poe mutate` | Mutation testing via mutmut — slow (~30-60 min); not part of `poe check`. Run before releases or as an occasional coverage gut-check. |
+
+### Mutation testing
+
+mutmut v3 hardcodes `os.fork()`, which segfaults on macOS + Python 3.14. Run it in Docker instead:
+
+```bash
+# Run mutations (slow — 30-60 min). Results are saved to mutants/**/*.meta.
+docker compose --profile mutmut run --rm mutmut
+
+# After the run, inspect results locally:
+uv run mutmut results          # list all surviving mutants
+uv run mutmut show <id>        # show the diff for a specific mutant
+```
+
+mutmut v3 stores results as JSON `.meta` files under `mutants/` (gitignored, bind-mounted into the container). Reruns resume from where they left off — mutmut skips mutants whose `.meta` file already exists.
 
 ### Changing the schema
 

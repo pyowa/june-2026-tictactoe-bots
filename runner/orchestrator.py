@@ -7,6 +7,7 @@ import asyncio
 import signal
 
 from messaging.client import make_connection
+from messaging.log import configure_logging
 from messaging.queue import MATCHES_QUEUE
 from runner.dispatch import handle_match_message
 
@@ -14,6 +15,7 @@ from runner.dispatch import handle_match_message
 async def run() -> None:  # pragma: no cover
     """Connect to the broker and serve forever. Exercised by the smoke test;
     excluded from coverage because it's all wiring."""
+    configure_logging()
     conn = await make_connection()
     rpc = await conn.make_rpc_client()
 

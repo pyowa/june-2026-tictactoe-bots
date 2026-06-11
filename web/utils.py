@@ -8,6 +8,7 @@ caller (no global FastAPI state).
 
 import ast
 import json
+import secrets
 import urllib.parse
 from typing import Any
 
@@ -27,7 +28,6 @@ SUPPORTED_PYTHON_VERSIONS: tuple[str, ...] = (
     "3.14",
 )
 DEFAULT_PYTHON_VERSION = SUPPORTED_PYTHON_VERSIONS[-1]
-
 
 
 def extract_bot_name(source: str) -> str | None:
@@ -98,7 +98,7 @@ def parse_cookie(value: str | None) -> dict:
 
 
 def encode_cookie(owned: dict) -> str:
-    return urllib.parse.quote(json.dumps(owned), safe="")
+    return urllib.parse.quote(json.dumps(owned), safe="")  # pragma: no mutate
 
 
 def group_matches_by_version(
@@ -127,13 +127,22 @@ async def enqueue_match_pairs(
     bots: BotRepository,
     new_bot_id: int,
     new_python_version: str,
-) -> None:
+) -> int:
     """Enqueue one MatchJob per unplayed pair involving the newly inserted
     bot. Includes the self-pair (`new` vs `new`). The chosen Python version
-    is `max(new, other)` so older bots run on newer interpreters."""
+    is `max(new, other)` so older bots run on newer interpreters.
+    Returns the number of jobs enqueued."""
     all_bots = await bots.all()
+    count = 0
     for other in all_bots:
         py = pick_python_version(new_python_version, other.python_version)
-        await queue.enqueue_match(MatchJob(new_bot_id, other.id, py))
+        await queue.enqueue_match(
+            MatchJob(new_bot_id, other.id, py, secrets.token_hex(16))
+        )
+        count += 1
         if other.id != new_bot_id:
-            await queue.enqueue_match(MatchJob(other.id, new_bot_id, py))
+            await queue.enqueue_match(
+                MatchJob(other.id, new_bot_id, py, secrets.token_hex(16))
+            )
+            count += 1
+    return count

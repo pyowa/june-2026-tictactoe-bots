@@ -19,7 +19,5 @@ bots/*
 # uv
 .uv/
 
-# mutmut
-.mutmut-cache
-.mutmut-cache.lock
+# mutmut — results live in mutants/**/*.meta (written by the Docker service)
 mutants/

@@ -32,7 +32,10 @@ def reconfigure(url: str) -> None:
     global _engine, session_factory, DATABASE_URL
     DATABASE_URL = url
     _engine = create_async_engine(url, poolclass=NullPool)
-    session_factory = async_sessionmaker(_engine, expire_on_commit=False)
+    session_factory = async_sessionmaker(
+        _engine,
+        expire_on_commit=False,  # pragma: no mutate -- None is falsy here
+    )
 
 
 @asynccontextmanager

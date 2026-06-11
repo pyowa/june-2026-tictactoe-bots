@@ -1,11 +1,39 @@
 import asyncio
+import inspect
 import json
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from messaging.log import configure_logging
 from messaging.routing import pick_python_version, turn_queue_for
 from messaging.rpc_client import RpcClient
+
+# ---------------------------------------------------------------------------
+# configure_logging
+# ---------------------------------------------------------------------------
+
+
+def test_configure_logging_installs_json_renderer() -> None:
+    import structlog
+
+    # Reset to structlog defaults before calling so that any mutation that
+    # drops processors= or logger_factory= leaves them at their defaults
+    # (empty list / StreamLoggerFactory), which differ from what we assert.
+    structlog.reset_defaults()
+    configure_logging()
+    config = structlog.get_config()
+    processor_types = [type(p).__name__ for p in config["processors"]]
+    assert "JSONRenderer" in processor_types
+    assert "TimeStamper" in processor_types
+    # logger_factory must be a PrintLoggerFactory
+    assert type(config["logger_factory"]).__name__ == "PrintLoggerFactory"
+    # TimeStamper must use ISO format so timestamps are parseable
+    timestamper = next(
+        p for p in config["processors"] if type(p).__name__ == "TimeStamper"
+    )
+    assert timestamper.fmt == "iso"
+
 
 # ---------------------------------------------------------------------------
 # Routing helpers
@@ -97,9 +125,15 @@ async def test_rpc_client_resolves_future_on_matching_correlation_id() -> None:
     await asyncio.sleep(0)
 
     # The publish call carries a correlation_id — extract it from the call args.
-    published_message = channel.default_exchange.publish.call_args[0][0]
+    call_args = channel.default_exchange.publish.call_args
+    published_message = call_args[0][0]
+    routing_key = call_args[1]["routing_key"]
     correlation_id = published_message.correlation_id
     assert correlation_id is not None
+    # routing_key must match the requested queue name
+    assert routing_key == "turn.py3.requests"
+    # reply_to must be set so the worker knows where to send the response
+    assert published_message.reply_to == "reply-q"
     # RabbitMQ wants expiration in milliseconds while RpcClient.call takes
     # seconds; pin the conversion so dropping `* 1000` is caught.
     assert published_message.expiration == 2500
@@ -112,6 +146,28 @@ async def test_rpc_client_resolves_future_on_matching_correlation_id() -> None:
 
     result = await task
     assert result == b"response-body"
+
+
+async def test_rpc_client_call_default_timeout_is_10_seconds() -> None:
+    """The default timeout must be 10.0s — expiration sent to broker is 10000ms."""
+    channel = MagicMock()
+    channel.default_exchange.publish = AsyncMock()
+    client = RpcClient(channel, reply_queue_name="reply-q")
+
+    async def driver() -> bytes:
+        return await client.call("q", b"x")  # no explicit timeout → uses default
+
+    task = asyncio.create_task(driver())
+    await asyncio.sleep(0)
+
+    published_message = channel.default_exchange.publish.call_args[0][0]
+    assert published_message.expiration == 10000  # 10.0 * 1000
+
+    task.cancel()
+    try:
+        await task
+    except (asyncio.CancelledError, TimeoutError):
+        pass
 
 
 async def test_rpc_client_times_out_when_no_reply() -> None:
@@ -197,7 +253,11 @@ async def test_rabbitmq_queue_publishes_match_job_as_json() -> None:
     queue._channel = channel
     queue._connection = MagicMock(is_closed=False)
 
-    await queue.enqueue_match(MatchJob(bot_x_id=1, bot_o_id=2, python_version="3.13"))
+    await queue.enqueue_match(
+        MatchJob(
+            bot_x_id=1, bot_o_id=2, python_version="3.13", correlation_id="test-cid"
+        )  # noqa: E501
+    )
 
     channel.default_exchange.publish.assert_awaited_once()
     args = channel.default_exchange.publish.call_args
@@ -205,8 +265,119 @@ async def test_rabbitmq_queue_publishes_match_job_as_json() -> None:
     routing_key = args[1]["routing_key"]
     assert routing_key == MATCHES_QUEUE
     payload = json.loads(message.body)
-    assert payload == {"bot_x_id": 1, "bot_o_id": 2, "python_version": "3.13"}
+    assert payload == {
+        "bot_x_id": 1,
+        "bot_o_id": 2,
+        "python_version": "3.13",
+        "correlation_id": "test-cid",
+    }
     # Durability + content-type contracts. Both can be silently broken
     # without changing visible behavior locally, so pin them.
     assert message.delivery_mode == aio_pika.DeliveryMode.PERSISTENT
     assert message.content_type == "application/json"
+
+
+# ---------------------------------------------------------------------------
+# make_queue — URL forwarded to RabbitMQQueue
+# ---------------------------------------------------------------------------
+
+
+def test_make_queue_uses_configured_broker_url() -> None:
+    """make_queue() must pass BROKER_URL to RabbitMQQueue — not None."""
+    from messaging.client import BROKER_URL, make_queue
+
+    queue = make_queue()
+    assert queue._url == BROKER_URL
+
+
+# ---------------------------------------------------------------------------
+# RpcClient — default timeout is exactly 10.0 seconds
+# ---------------------------------------------------------------------------
+
+
+def test_rpc_client_call_signature_default_timeout_is_10() -> None:
+    """The default timeout in `call` must be exactly 10.0.
+    Changing it to 11.0 or any other value would silently alter the
+    RabbitMQ message expiration sent to the broker."""
+    sig = inspect.signature(RpcClient.call)
+    assert sig.parameters["timeout"].default == 10.0
+
+
+# ---------------------------------------------------------------------------
+# RabbitMQQueue — __init__ and _ensure_connected
+# ---------------------------------------------------------------------------
+
+
+def test_rabbitmq_queue_init_sets_channel_to_none() -> None:
+    """__init__ must set _channel to None so the lazy-connect branch can tell
+    that no connection exists yet. Setting it to "" or any truthy value would
+    skip the connect branch on the first publish."""
+    from messaging.rabbitmq import RabbitMQQueue
+
+    queue = RabbitMQQueue("amqp://test")
+    assert queue._channel is None
+    assert queue._connection is None
+    assert queue._url == "amqp://test"
+
+
+async def test_ensure_connected_opens_connection_when_none() -> None:
+    """_ensure_connected must call aio_pika.connect_robust when _connection is
+    None. Changing `or` to `and` in the condition would skip the branch when
+    _connection is None and is_closed would raise AttributeError on NoneType."""
+    from messaging.rabbitmq import RabbitMQQueue
+
+    mock_channel = MagicMock()
+    mock_channel.declare_queue = AsyncMock()
+    mock_connection = MagicMock(is_closed=False)
+    mock_connection.channel = AsyncMock(return_value=mock_channel)
+
+    queue = RabbitMQQueue("amqp://test")
+    with patch(
+        "messaging.rabbitmq.aio_pika.connect_robust",
+        AsyncMock(return_value=mock_connection),
+    ) as mock_connect:
+        channel = await queue._ensure_connected()
+
+    from messaging.queue import MATCHES_QUEUE
+
+    mock_connect.assert_awaited_once_with("amqp://test")
+    mock_channel.declare_queue.assert_awaited_once_with(MATCHES_QUEUE, durable=True)
+    assert channel is mock_channel
+    assert queue._connection is mock_connection
+
+
+# ---------------------------------------------------------------------------
+# RabbitMQQueue — close() guards
+# ---------------------------------------------------------------------------
+
+
+async def test_rabbitmq_queue_close_closes_open_connection() -> None:
+    """`close()` must call `connection.close()` when connection is open."""
+    from messaging.rabbitmq import RabbitMQQueue
+
+    queue = RabbitMQQueue("amqp://test")
+    mock_conn = MagicMock(is_closed=False)
+    mock_conn.close = AsyncMock()
+    queue._connection = mock_conn
+    await queue.close()
+    mock_conn.close.assert_awaited_once()
+
+
+async def test_rabbitmq_queue_close_skips_already_closed_connection() -> None:
+    """`close()` must not call `connection.close()` when `is_closed` is True."""
+    from messaging.rabbitmq import RabbitMQQueue
+
+    queue = RabbitMQQueue("amqp://test")
+    mock_conn = MagicMock(is_closed=True)
+    mock_conn.close = AsyncMock()
+    queue._connection = mock_conn
+    await queue.close()
+    mock_conn.close.assert_not_awaited()
+
+
+async def test_rabbitmq_queue_close_skips_when_no_connection() -> None:
+    """`close()` must be a no-op when `_connection` is None."""
+    from messaging.rabbitmq import RabbitMQQueue
+
+    queue = RabbitMQQueue("amqp://test")
+    await queue.close()  # must not raise

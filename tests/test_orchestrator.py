@@ -6,6 +6,7 @@ from typing import Any
 import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
+from structlog.testing import capture_logs
 
 import runner.orchestrator  # noqa: F401  -- smoke-import the entrypoint module so coverage sees its top-level imports
 from db.session import get_session
@@ -13,10 +14,16 @@ from entities.bot.model import Bot
 from entities.match.model import Match
 from entities.match.repository import MatchRepository
 from entities.move.model import Move as MoveModel
+from entities.move.repository import MoveRepository
 from runner.dispatch import fetch_bot_sources, handle_match_message
 from runner.engine import MatchResult, Move
 from runner.match_loop import play_match_rpc
-from tests.conftest import TEST_ASYNC_URL, db_insert_bot
+from tests.conftest import (
+    TEST_ASYNC_URL,
+    db_insert_bot,
+    db_insert_match,
+    db_insert_move,
+)
 
 
 async def _read_match_row(engine: AsyncEngine) -> tuple[str, int | None]:
@@ -26,9 +33,7 @@ async def _read_match_row(engine: AsyncEngine) -> tuple[str, int | None]:
     bare `select(...).one()` is sufficient — no `match_id` filter needed."""
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
-        row = (await session.execute(
-            select(Match.result, Match.winner_id)
-        )).one()
+        row = (await session.execute(select(Match.result, Match.winner_id))).one()
         return row.result, row.winner_id
 
 
@@ -68,7 +73,7 @@ async def test_play_match_x_wins_with_row() -> None:
             {"board": "X|X|X\n.|O|.\n.|.|O", "error": None},  # X wins
         ]
     )
-    result = await play_match_rpc(rpc, b"# bot x", b"# bot o", "3")
+    result = await play_match_rpc(rpc, b"# bot x", b"# bot o", "3", "test-cid")
     assert result.result == "x_wins"
     assert len(result.moves) == 5
 
@@ -86,21 +91,21 @@ async def test_play_match_cat_game() -> None:
         "X|O|X\nX|O|O\nO|X|X",
     ]
     rpc = _ScriptedRpc([{"board": b, "error": None} for b in boards])
-    result = await play_match_rpc(rpc, b"", b"", "3")
+    result = await play_match_rpc(rpc, b"", b"", "3", "test-cid")
     assert result.result == "cat"
     assert len(result.moves) == 9
 
 
 async def test_play_match_x_forfeits_on_worker_error() -> None:
     rpc = _ScriptedRpc([{"board": None, "error": "timeout after 5s"}])
-    result = await play_match_rpc(rpc, b"", b"", "3")
+    result = await play_match_rpc(rpc, b"", b"", "3", "test-cid")
     assert result.result == "x_forfeit"
     assert "timeout after 5s" in (result.moves[-1].error or "")
 
 
 async def test_play_match_x_forfeits_on_unparseable_board() -> None:
     rpc = _ScriptedRpc([{"board": "garbage", "error": None}])
-    result = await play_match_rpc(rpc, b"", b"", "3")
+    result = await play_match_rpc(rpc, b"", b"", "3", "test-cid")
     assert result.result == "x_forfeit"
     assert "unparseable" in (result.moves[-1].error or "")
 
@@ -113,7 +118,7 @@ async def test_play_match_forfeit_uses_no_output_fallback_on_empty_response() ->
         async def call(self, target_queue, payload, timeout=10.0):
             return b"{}"
 
-    result = await play_match_rpc(_EmptyDictRpc(), b"", b"", "3")
+    result = await play_match_rpc(_EmptyDictRpc(), b"", b"", "3", "test-cid")
     assert result.result == "x_forfeit"
     assert result.moves[-1].error == "no output"
 
@@ -125,7 +130,7 @@ async def test_play_match_o_forfeits_on_invalid_move() -> None:
             {"board": "X|.|.\n.|.|.\n.|.|.", "error": None},  # O makes no move
         ]
     )
-    result = await play_match_rpc(rpc, b"", b"", "3")
+    result = await play_match_rpc(rpc, b"", b"", "3", "test-cid")
     assert result.result == "o_forfeit"
 
 
@@ -134,7 +139,7 @@ async def test_play_match_timeout_results_in_forfeit() -> None:
         async def call(self, target_queue, payload, timeout=10.0):
             raise TimeoutError()
 
-    result = await play_match_rpc(_TimeoutRpc(), b"", b"", "3", timeout=2.0)
+    result = await play_match_rpc(_TimeoutRpc(), b"", b"", "3", "test-cid", timeout=2.0)
     assert result.result == "x_forfeit"
     assert "timeout after 2.0s" in (result.moves[-1].error or "")
 
@@ -149,7 +154,7 @@ async def test_play_match_routes_to_right_queue_per_python_version() -> None:
             {"board": "X|X|X\n.|O|.\n.|.|O", "error": None},
         ]
     )
-    await play_match_rpc(rpc, b"", b"", "3.13")
+    await play_match_rpc(rpc, b"", b"", "3.13", "test-cid")
     for queue_name, _, _ in rpc.calls:
         assert queue_name == "turn.py313.requests"
 
@@ -164,16 +169,90 @@ async def test_play_match_passes_each_bots_source_to_correct_turns() -> None:
             {"board": "X|X|X\n.|O|.\n.|.|O", "error": None},  # X wins
         ]
     )
-    await play_match_rpc(rpc, b"SOURCE_X", b"SOURCE_O", "3")
-    decoded = [
-        base64.b64decode(call[1]["source_b64"]) for call in rpc.calls
-    ]
+    await play_match_rpc(rpc, b"SOURCE_X", b"SOURCE_O", "3", "test-cid")
+    decoded = [base64.b64decode(call[1]["source_b64"]) for call in rpc.calls]
     # X turns at indices 0, 2, 4; O turns at 1, 3.
     assert decoded[0] == b"SOURCE_X"
     assert decoded[2] == b"SOURCE_X"
     assert decoded[4] == b"SOURCE_X"
     assert decoded[1] == b"SOURCE_O"
     assert decoded[3] == b"SOURCE_O"
+
+
+def test_bot_forfeit_init_passes_error_to_base_exception() -> None:
+    """_BotForfeit must pass error to super().__init__ so str(exc) == error."""
+    from runner.match_loop import _BotForfeit
+
+    exc = _BotForfeit("timeout after 5s")
+    assert exc.args == ("timeout after 5s",)
+    assert str(exc) == "timeout after 5s"
+
+
+async def test_request_turn_payload_has_exact_key_names() -> None:
+    """All five payload keys must be present by exact name."""
+    rpc = _ScriptedRpc([{"board": None, "error": "test"}])  # forfeit ends the match
+    await play_match_rpc(rpc, b"", b"", "3", "cid-keys")
+    payload = rpc.calls[0][1]
+    expected = {"symbol", "board", "source_b64", "correlation_id", "move_number"}
+    assert set(payload.keys()) == expected
+
+
+async def test_request_turn_payload_carries_symbol_correlation_id_move_number() -> None:
+    """Pin symbol, correlation_id, and move_number values on the first turn."""
+    rpc = _ScriptedRpc([{"board": None, "error": "test"}])  # forfeit ends the match
+    await play_match_rpc(rpc, b"", b"", "3", "my-cid")
+    payload = rpc.calls[0][1]
+    assert payload["symbol"] == "X"
+    assert payload["correlation_id"] == "my-cid"
+    assert payload["move_number"] == 1
+
+
+async def test_request_turn_forwards_timeout_to_rpc_call() -> None:
+    """timeout kwarg must reach rpc.call unchanged."""
+    rpc = _ScriptedRpc([{"board": None, "error": "test"}])  # forfeit ends the match
+    await play_match_rpc(rpc, b"", b"", "3", "cid", timeout=7.5)
+    assert rpc.calls[0][2] == 7.5
+
+
+async def test_play_match_o_player_recorded_as_lowercase_o() -> None:
+    """O moves must record player == "o" — kills O-player label mutants."""
+    rpc = _ScriptedRpc(
+        [
+            {"board": "X|.|.\n.|.|.\n.|.|.", "error": None},
+            {"board": "X|.|.\n.|O|.\n.|.|.", "error": None},
+            {"board": "X|X|.\n.|O|.\n.|.|.", "error": None},
+            {"board": "X|X|.\n.|O|.\n.|.|O", "error": None},
+            {"board": "X|X|X\n.|O|.\n.|.|O", "error": None},
+        ]
+    )
+    result = await play_match_rpc(rpc, b"", b"", "3", "cid")
+    assert result.moves[1].player == "o"
+    assert result.moves[3].player == "o"
+
+
+async def test_play_match_forfeit_move_carries_move_number_player_and_board() -> None:
+    """After a forfeit, the last Move must carry move_number, player, and board."""
+    rpc = _ScriptedRpc([{"board": None, "error": "timeout after 5s"}])
+    result = await play_match_rpc(rpc, b"", b"", "3", "cid")
+    assert result.result == "x_forfeit"
+    m = result.moves[-1]
+    assert m.move_number == 1
+    assert m.player == "x"
+    assert m.board == ".|.|.\n.|.|.\n.|.|."
+
+
+async def test_play_match_forfeit_error_for_invalid_move_is_not_none() -> None:
+    """validate_move failure must produce a non-None, non-empty error string."""
+    rpc = _ScriptedRpc(
+        [
+            {"board": "X|.|.\n.|.|.\n.|.|.", "error": None},  # X plays (0,0)
+            {"board": "X|.|.\n.|.|.\n.|.|.", "error": None},  # O makes no move
+        ]
+    )
+    result = await play_match_rpc(rpc, b"", b"", "3", "cid")
+    assert result.result == "o_forfeit"
+    assert result.moves[-1].error is not None
+    assert len(result.moves[-1].error) > 0
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +265,7 @@ async def _bound_db(engine: AsyncEngine) -> AsyncIterator[None]:
     """Bind the async DB engine to the test Postgres so handle_match_message
     can fetch + persist via `get_session()`."""
     import db.session
+
     db.session.reconfigure(TEST_ASYNC_URL)
     yield
 
@@ -231,7 +311,12 @@ async def test_handle_match_message_persists_o_winning_result(
         ]
     )
     body = json.dumps(
-        {"bot_x_id": a, "bot_o_id": b, "python_version": "3"}
+        {
+            "bot_x_id": a,
+            "bot_o_id": b,
+            "python_version": "3",
+            "correlation_id": "test-cid",
+        }
     ).encode()
     await handle_match_message(rpc, body)
     result_value, winner_id = await _read_match_row(engine)
@@ -261,7 +346,12 @@ async def test_handle_match_message_persists_cat_result(
     ]
     rpc = _ScriptedRpc([{"board": b, "error": None} for b in boards])
     body = json.dumps(
-        {"bot_x_id": a, "bot_o_id": b, "python_version": "3"}
+        {
+            "bot_x_id": a,
+            "bot_o_id": b,
+            "python_version": "3",
+            "correlation_id": "test-cid",
+        }
     ).encode()
     await handle_match_message(rpc, body)
     result_value, winner_id = await _read_match_row(engine)
@@ -287,7 +377,12 @@ async def test_handle_match_message_persists_result(
         ]
     )
     body = json.dumps(
-        {"bot_x_id": a, "bot_o_id": b, "python_version": "3"}
+        {
+            "bot_x_id": a,
+            "bot_o_id": b,
+            "python_version": "3",
+            "correlation_id": "test-cid",
+        }
     ).encode()
     result = await handle_match_message(rpc, body)
     assert result.result == "x_wins"
@@ -299,13 +394,15 @@ async def test_handle_match_message_persists_result(
     # is caught.
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
-        move_rows = (await session.execute(
-            select(
-                MoveModel.move_number,
-                MoveModel.bot_id,
-                MoveModel.board_state,
-            ).order_by(MoveModel.move_number)
-        )).all()
+        move_rows = (
+            await session.execute(
+                select(
+                    MoveModel.move_number,
+                    MoveModel.bot_id,
+                    MoveModel.board_state,
+                ).order_by(MoveModel.move_number)
+            )
+        ).all()
     assert result_value == "x_wins"
     assert winner_id == a
 
@@ -343,7 +440,7 @@ async def test_record_match_x_forfeit_credits_o_as_winner(
         moves=[Move(1, "x", ".|.|.\n.|.|.\n.|.|.", "timeout after 5s")],
     )
     async with get_session() as session:
-        await MatchRepository(session).record(bot_x_id, bot_o_id, result)
+        await MatchRepository(session).record(bot_x_id, bot_o_id, result, "test-cid")
 
     result_value, winner_id = await _read_match_row(engine)
     assert result_value == "x_forfeit"
@@ -365,8 +462,290 @@ async def test_record_match_o_forfeit_credits_x_as_winner(
         ],
     )
     async with get_session() as session:
-        await MatchRepository(session).record(bot_x_id, bot_o_id, result)
+        await MatchRepository(session).record(bot_x_id, bot_o_id, result, "test-cid")
 
     result_value, winner_id = await _read_match_row(engine)
     assert result_value == "o_forfeit"
     assert winner_id == bot_x_id
+
+
+# ---------------------------------------------------------------------------
+# Structured logging
+# ---------------------------------------------------------------------------
+
+
+async def test_play_match_logs_turn_request_and_result_per_turn() -> None:
+    rpc = _ScriptedRpc(
+        [
+            {"board": "X|.|.\n.|.|.\n.|.|.", "error": None},
+            {"board": "X|.|.\n.|O|.\n.|.|.", "error": None},
+            {"board": "X|X|.\n.|O|.\n.|.|.", "error": None},
+            {"board": "X|X|.\n.|O|.\n.|.|O", "error": None},
+            {"board": "X|X|X\n.|O|.\n.|.|O", "error": None},
+        ]
+    )
+    with capture_logs() as cap:
+        await play_match_rpc(rpc, b"", b"", "3", "corr-123")
+
+    turn_reqs = [e for e in cap if e["event"] == "turn_request"]
+    turn_res = [e for e in cap if e["event"] == "turn_result"]
+    assert len(turn_reqs) == 5
+    assert len(turn_res) == 5
+    assert all(e["correlation_id"] == "corr-123" for e in turn_reqs)
+    assert turn_reqs[0] == {
+        "event": "turn_request",
+        "correlation_id": "corr-123",
+        "move_number": 1,
+        "symbol": "X",
+        "queue": "turn.py3.requests",
+        "log_level": "info",
+    }
+    assert turn_res[0] == {
+        "event": "turn_result",
+        "correlation_id": "corr-123",
+        "move_number": 1,
+        "outcome": "valid",
+        "log_level": "info",
+    }
+    assert all(e["outcome"] == "valid" for e in turn_res)
+
+
+async def test_play_match_logs_forfeit_turn_result() -> None:
+    rpc = _ScriptedRpc([{"board": None, "error": "timeout after 5s"}])
+    with capture_logs() as cap:
+        await play_match_rpc(rpc, b"", b"", "3", "corr-456")
+
+    forfeit = [e for e in cap if e.get("outcome") == "forfeit"]
+    assert len(forfeit) == 1
+    assert forfeit[0]["event"] == "turn_result"
+    assert forfeit[0]["correlation_id"] == "corr-456"
+    assert forfeit[0]["move_number"] == 1
+    assert forfeit[0]["error"] == "timeout after 5s"
+
+
+async def test_handle_match_message_logs_match_started_and_complete(
+    engine: AsyncEngine, _bound_db: None
+) -> None:
+    a = await db_insert_bot(engine, "Alpha")
+    b = await db_insert_bot(engine, "Beta")
+    await _set_source(engine, a, b"")
+    await _set_source(engine, b, b"")
+
+    rpc = _ScriptedRpc(
+        [
+            {"board": "X|.|.\n.|.|.\n.|.|.", "error": None},
+            {"board": "X|.|.\n.|O|.\n.|.|.", "error": None},
+            {"board": "X|X|.\n.|O|.\n.|.|.", "error": None},
+            {"board": "X|X|.\n.|O|.\n.|.|O", "error": None},
+            {"board": "X|X|X\n.|O|.\n.|.|O", "error": None},
+        ]
+    )
+    body = json.dumps(
+        {
+            "bot_x_id": a,
+            "bot_o_id": b,
+            "python_version": "3",
+            "correlation_id": "corr-789",
+        }
+    ).encode()
+    with capture_logs() as cap:
+        await handle_match_message(rpc, body)
+
+    started = [e for e in cap if e["event"] == "match_started"]
+    complete = [e for e in cap if e["event"] == "match_complete"]
+    assert len(started) == 1
+    assert started[0]["correlation_id"] == "corr-789"
+    assert started[0]["bot_x_id"] == a
+    assert len(complete) == 1
+    assert complete[0]["result"] == "x_wins"
+    assert complete[0]["moves"] == 5
+
+
+async def test_record_persists_correlation_id(
+    engine: AsyncEngine, _bound_db: None
+) -> None:
+    bot_x_id = await db_insert_bot(engine, "Alpha")
+    bot_o_id = await db_insert_bot(engine, "Beta")
+    result = MatchResult(
+        result="x_wins",
+        moves=[Move(1, "x", "X|X|X\n.|.|.\n.|.|.")],
+    )
+    async with get_session() as session:
+        await MatchRepository(session).record(bot_x_id, bot_o_id, result, "stored-cid")
+
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        from entities.match.model import Match
+
+        row = (await session.execute(select(Match.correlation_id))).one()
+    assert row.correlation_id == "stored-cid"
+
+
+# ---------------------------------------------------------------------------
+# MatchRepository.record — move error field is persisted
+# ---------------------------------------------------------------------------
+
+
+async def test_record_persists_move_error(engine: AsyncEngine, _bound_db: None) -> None:
+    """error=move.error must reach the DB row. Dropping or nulling the field
+    would make forfeit error messages invisible on the match-detail page."""
+    bot_x_id = await db_insert_bot(engine, "Alpha")
+    bot_o_id = await db_insert_bot(engine, "Beta")
+    result = MatchResult(
+        result="x_forfeit",
+        moves=[Move(1, "x", ".|.|.\n.|.|.\n.|.|.", "timeout after 5s")],
+    )
+    async with get_session() as session:
+        await MatchRepository(session).record(bot_x_id, bot_o_id, result, "err-cid")
+
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        row = (await session.execute(select(MoveModel.error))).one()
+    assert row.error == "timeout after 5s"
+
+
+# ---------------------------------------------------------------------------
+# MatchRepository.list_for_bot — filtering and ordering
+# ---------------------------------------------------------------------------
+
+
+async def test_list_for_bot_includes_matches_where_bot_is_o(
+    engine: AsyncEngine, _bound_db: None
+) -> None:
+    """list_for_bot must include matches where the bot plays as O, not only X.
+    Mutations that replace `bo.c.base_name == base_name` with a falsy or
+    inverted condition would silently drop O-side matches."""
+    a = await db_insert_bot(engine, "Alpha")
+    b = await db_insert_bot(engine, "Beta")
+    # Beta is O in this match
+    await db_insert_match(engine, a, b, winner_id=a, result="x_wins")
+
+    async with get_session() as session:
+        rows = await MatchRepository(session).list_for_bot("Beta")
+
+    assert len(rows) == 1
+    assert rows[0].bot_o == "Beta"
+
+
+async def test_list_for_bot_excludes_unrelated_matches(
+    engine: AsyncEngine, _bound_db: None
+) -> None:
+    """list_for_bot must not return matches that don't involve the bot family."""
+    a = await db_insert_bot(engine, "Alpha")
+    b = await db_insert_bot(engine, "Beta")
+    c = await db_insert_bot(engine, "Gamma")
+    await db_insert_match(engine, a, b, winner_id=a, result="x_wins")  # Alpha vs Beta
+    await db_insert_match(engine, b, c, winner_id=b, result="x_wins")  # Beta vs Gamma
+
+    async with get_session() as session:
+        rows = await MatchRepository(session).list_for_bot("Alpha")
+
+    # Only the Alpha vs Beta match should appear
+    assert len(rows) == 1
+    assert rows[0].bot_x == "Alpha"
+
+
+async def test_list_for_bot_returns_newest_first(
+    engine: AsyncEngine, _bound_db: None
+) -> None:
+    """list_for_bot must order by played_at DESC. Dropping the order_by clause
+    lets Postgres return rows in any order, breaking the UI listing."""
+    a = await db_insert_bot(engine, "Alpha")
+    b = await db_insert_bot(engine, "Beta")
+    early = await db_insert_match(
+        engine,
+        a,
+        b,
+        winner_id=a,
+        result="x_wins",
+        played_at="2024-01-01 00:00:00",
+    )
+    late = await db_insert_match(
+        engine,
+        a,
+        b,
+        winner_id=b,
+        result="o_wins",
+        played_at="2025-06-01 00:00:00",
+    )
+
+    async with get_session() as session:
+        rows = await MatchRepository(session).list_for_bot("Alpha")
+
+    assert rows[0].id == late
+    assert rows[1].id == early
+
+
+# ---------------------------------------------------------------------------
+# _match_select — winner column label and join condition
+# ---------------------------------------------------------------------------
+
+
+async def test_match_select_winner_column_is_named_winner(
+    engine: AsyncEngine, _bound_db: None
+) -> None:
+    """The 'winner' label on bw.c.versioned_name must survive intact.
+    Dropping the column, nulling it, renaming it, or inverting the outerjoin
+    condition would cause row.winner to be missing or wrong."""
+    a = await db_insert_bot(engine, "Alpha")
+    b = await db_insert_bot(engine, "Beta")
+    await db_insert_match(engine, a, b, winner_id=a, result="x_wins")
+
+    async with get_session() as session:
+        rows = await MatchRepository(session).list_all()
+
+    assert len(rows) == 1
+    assert rows[0].winner == "Alpha"
+
+
+async def test_match_select_winner_is_none_for_draw(
+    engine: AsyncEngine, _bound_db: None
+) -> None:
+    """Outerjoin: when there is no winner, row.winner must be None (not an error)."""
+    a = await db_insert_bot(engine, "Alpha")
+    b = await db_insert_bot(engine, "Beta")
+    await db_insert_match(engine, a, b, winner_id=None, result="cat")
+
+    async with get_session() as session:
+        rows = await MatchRepository(session).list_all()
+
+    assert rows[0].winner is None
+
+
+# ---------------------------------------------------------------------------
+# MoveRepository.for_match — ordering and join
+# ---------------------------------------------------------------------------
+
+
+async def test_move_repository_for_match_returns_moves_in_order(
+    engine: AsyncEngine, _bound_db: None
+) -> None:
+    """for_match must ORDER BY move_number ASC. Inserting out-of-order and
+    relying on DB order would make the rendered move log scrambled."""
+    a = await db_insert_bot(engine, "Alpha")
+    b = await db_insert_bot(engine, "Beta")
+    match_id = await db_insert_match(engine, a, b, winner_id=a, result="x_wins")
+    # Insert move 2 before move 1 to expose any missing ORDER BY
+    await db_insert_move(engine, match_id, 2, b, "X|.|.\n.|O|.\n.|.|.")
+    await db_insert_move(engine, match_id, 1, a, "X|.|.\n.|.|.\n.|.|.")
+
+    async with get_session() as session:
+        rows = await MoveRepository(session).for_match(match_id)
+
+    assert [r.move_number for r in rows] == [1, 2]
+
+
+async def test_move_repository_for_match_projects_bot_name(
+    engine: AsyncEngine, _bound_db: None
+) -> None:
+    """for_match must join Bots and project versioned_name as 'bot_name'.
+    A broken join condition (None or dropped) would produce wrong or missing names."""
+    a = await db_insert_bot(engine, "Alpha")
+    b = await db_insert_bot(engine, "Beta")
+    match_id = await db_insert_match(engine, a, b, winner_id=a, result="x_wins")
+    await db_insert_move(engine, match_id, 1, a, "X|.|.\n.|.|.\n.|.|.")
+
+    async with get_session() as session:
+        rows = await MoveRepository(session).for_match(match_id)
+
+    assert rows[0].bot_name == "Alpha"

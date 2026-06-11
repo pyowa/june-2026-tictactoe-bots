@@ -228,14 +228,16 @@ async def test_main_drops_tables_runs_alembic_and_purges_queues(
     # Tables really got dropped.
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
-        present = (await session.execute(
-            select(
-                func.to_regclass("public.bots"),
-                func.to_regclass("public.matches"),
-                func.to_regclass("public.moves"),
-                func.to_regclass("public.alembic_version"),
+        present = (
+            await session.execute(
+                select(
+                    func.to_regclass("public.bots"),
+                    func.to_regclass("public.matches"),
+                    func.to_regclass("public.moves"),
+                    func.to_regclass("public.alembic_version"),
+                )
             )
-        )).one()
+        ).one()
     assert present is not None
     assert all(v is None for v in present)
 

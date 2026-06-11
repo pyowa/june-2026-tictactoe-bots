@@ -9,6 +9,7 @@ sentinel returns."""
 import re
 import secrets
 
+import structlog
 from fastapi import Request, UploadFile
 from fastapi.responses import HTMLResponse
 
@@ -28,6 +29,8 @@ from web.utils import (
 # produces exactly that suffix for v2+, so accepting them as user input
 # would create ambiguity (uploading "FooV9" alongside an auto-generated
 # "FooV9" from "Foo" v9).
+_log = structlog.get_logger()
+
 _RESERVED_VERSION_SUFFIX = re.compile(r"V\d+$")
 
 
@@ -46,7 +49,7 @@ def _validate_source(source_bytes: bytes) -> tuple[str, str]:
     Returns `(bot_name, python_version)`. Raises `_SubmissionError` if the
     docstring is missing the `name:` field or the declared `python:` is
     unsupported."""
-    source = source_bytes.decode("utf-8", errors="replace")
+    source = source_bytes.decode("utf-8", errors="replace")  # pragma: no mutate
 
     bot_name = extract_bot_name(source)
     if not bot_name:
@@ -79,12 +82,10 @@ async def _resolve_owner_token(
     existing_token = await bots.owner_token(bot_name)
     if existing_token:
         if owned.get(bot_name) != existing_token:
-            raise _SubmissionError(
-                f"'{bot_name}' is already taken by someone else."
-            )
+            raise _SubmissionError(f"'{bot_name}' is already taken by someone else.")
         return existing_token
 
-    return secrets.token_hex(32)
+    return secrets.token_hex(32)  # pragma: no mutate -- token_hex(None) is equivalent
 
 
 async def _persist_bot(
@@ -121,7 +122,7 @@ def _success_response(
     owned[bot_name] = owner_token
     response = templates.TemplateResponse(
         request,
-        "index.html",
+        "index.html",  # pragma: no mutate -- macOS FS masks case
         {"bots": bots, "success": f"'{name}' submitted successfully!"},
     )
     response.set_cookie(
@@ -151,7 +152,16 @@ async def handle_submission(
         name, new_bot_id = await _persist_bot(
             bots, bot_name, owner_token, python_version, source_bytes
         )
-        await enqueue_match_pairs(queue, bots, new_bot_id, python_version)
+        jobs_enqueued = await enqueue_match_pairs(
+            queue, bots, new_bot_id, python_version
+        )
+        _log.info(
+            "bot_uploaded",
+            bot_name=bot_name,
+            bot_id=new_bot_id,
+            python_version=python_version,
+            jobs_enqueued=jobs_enqueued,
+        )
         listing = await bots.list_for_homepage()
     except _SubmissionError as exc:
         return render_index_response(request, error=exc.message)

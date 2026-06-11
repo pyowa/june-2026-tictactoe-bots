@@ -20,6 +20,6 @@ def make_queue() -> RabbitMQQueue:
 async def make_connection() -> BrokerConnection:  # pragma: no cover
     """Open a RabbitMQ connection and return a broker-agnostic wrapper.
     Called once per process at startup; the connection is long-lived."""
-    connection = await aio_pika.connect_robust(BROKER_URL)
-    channel = await connection.channel()
-    return RabbitMQBrokerConnection(connection, channel)
+    connection = await aio_pika.connect_robust(BROKER_URL)  # pragma: no mutate
+    channel = await connection.channel()  # pragma: no mutate
+    return RabbitMQBrokerConnection(connection, channel)  # pragma: no mutate

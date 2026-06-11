@@ -92,14 +92,16 @@ async def test_main_inserts_bots_and_enqueues_match_jobs(
 
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
-        rows = (await session.execute(
-            select(
-                Bot.base_name,
-                Bot.versioned_name,
-                Bot.version,
-                Bot.python_version,
-            ).order_by(Bot.base_name)
-        )).all()
+        rows = (
+            await session.execute(
+                select(
+                    Bot.base_name,
+                    Bot.versioned_name,
+                    Bot.version,
+                    Bot.python_version,
+                ).order_by(Bot.base_name)
+            )
+        ).all()
 
     # Both bots inserted with v1 and the expected python_version.
     assert len(rows) == 2
@@ -111,6 +113,7 @@ async def test_main_inserts_bots_and_enqueues_match_jobs(
     assert by_name["Beta"][2] == 1
     # Default python version when no `python:` field — matches web.utils' default.
     from web.utils import DEFAULT_PYTHON_VERSION
+
     assert by_name["Beta"][3] == DEFAULT_PYTHON_VERSION
 
     # 2 bots -> 2*2 = 4 MatchJobs enqueued.
@@ -138,11 +141,13 @@ async def test_main_auto_versions_duplicate_names(
 
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
-        rows = (await session.execute(
-            select(Bot.versioned_name, Bot.version)
-            .where(Bot.base_name == "Foo")
-            .order_by(Bot.version)
-        )).all()
+        rows = (
+            await session.execute(
+                select(Bot.versioned_name, Bot.version)
+                .where(Bot.base_name == "Foo")
+                .order_by(Bot.version)
+            )
+        ).all()
     assert [(r[0], r[1]) for r in rows] == [("Foo", 1), ("FooV2", 2)]
 
 
@@ -168,10 +173,7 @@ async def test_main_skips_files_without_name_field(
 
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
-        names = [
-            r[0]
-            for r in (await session.execute(select(Bot.base_name))).all()
-        ]
+        names = [r[0] for r in (await session.execute(select(Bot.base_name))).all()]
     assert names == ["Good"]
     # Only one bot inserted -> 1*1 = 1 match job.
     assert len(mock_queue.messages) == 1
@@ -195,9 +197,11 @@ async def test_main_falls_back_to_python_3_when_version_unsupported(
 
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
-        row = (await session.execute(
-            select(Bot.python_version).where(Bot.base_name == "Weird")
-        )).one()
+        row = (
+            await session.execute(
+                select(Bot.python_version).where(Bot.base_name == "Weird")
+            )
+        ).one()
     assert row[0] == "3"
 
 
@@ -219,8 +223,6 @@ async def test_main_with_empty_directory_prints_and_returns(
 
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
-        count = (await session.execute(
-            select(func.count()).select_from(Bot)
-        )).scalar()
+        count = (await session.execute(select(func.count()).select_from(Bot))).scalar()
     assert count == 0
     assert mock_queue.messages == []

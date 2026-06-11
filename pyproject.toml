@@ -16,6 +16,7 @@ dependencies = [
     # dependency below rather than a runtime one. Production / scripts /
     # runner / web all use asyncpg exclusively.
     "aio-pika",
+    "structlog>=26.1.0",
 ]
 
 [tool.uv]
@@ -36,6 +37,7 @@ dev = [
     # The runtime app is async-only.
     "psycopg2-binary",
     "mutmut>=3.5.0",
+    "beautifulsoup4>=4.15.0",
 ]
 
 [tool.poe.tasks]
@@ -66,6 +68,7 @@ ignore = ["ANN401"]
 [tool.pytest.ini_options]
 addopts = "--cov=web --cov=db --cov=entities --cov=runner --cov=messaging --cov=scripts --cov-report=term-missing"
 asyncio_mode = "auto"
+norecursedirs = ["mutants"]
 
 [tool.coverage.run]
 omit = ["bots/*", "tests/*", "example_bots/*"]
@@ -98,4 +101,20 @@ paths_to_mutate = [
     "messaging/",
     "scripts/",
 ]
+# Files excluded from mutation testing because they contain only live-broker
+# or live-database wiring that cannot be unit-tested without a real service.
+# These files are already excluded from coverage via `# pragma: no cover`.
+do_not_mutate = [
+    "runner/orchestrator.py",
+    "runner/turn_worker.py",
+    "messaging/connection.py",
+    "messaging/rpc_server.py",
+    "scripts/reset_db.py",
+    "scripts/seed_example_bots.py",
+]
 tests_dir = ["tests/"]
+# Disable coverage during mutation runs. mutmut runs pytest from inside
+# mutants/ where all source files are trampoline-padded (hundreds of
+# generated functions each); instrumenting them causes pytest collection to
+# hang. Coverage is irrelevant during mutation testing anyway.
+pytest_add_cli_args = ["--override-ini=addopts="]

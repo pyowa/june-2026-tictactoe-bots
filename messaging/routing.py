@@ -4,6 +4,7 @@ def pick_python_version(a: str, b: str) -> str:
     Used when bot X declares one version and bot O declares another; both
     bots run in the higher version (older code should still run on newer
     Python). Falls back to lexicographic comparison if parsing fails."""
+
     def parse(v: str) -> tuple[int, ...]:
         try:
             return tuple(int(x) for x in v.split("."))

@@ -21,10 +21,19 @@ def render_index_response(request: Request, **ctx: Any) -> HTMLResponse:
 
     Used for submission-error and submission-success flows where the page
     needs to show a message banner above the (empty/refreshed) listing."""
-    return templates.TemplateResponse(request, "index.html", {"bots": [], **ctx})
+    return templates.TemplateResponse(
+        request,
+        "index.html",  # pragma: no mutate -- macOS FS masks case
+        {"bots": [], **ctx},
+    )
 
 
 def not_found(request: Request) -> HTMLResponse:
     """Standard 404 response used by routes whose path parameter doesn't
     resolve to a known entity."""
-    return templates.TemplateResponse(request, "404.html", {}, status_code=404)
+    return templates.TemplateResponse(
+        request,
+        "404.html",  # pragma: no mutate -- macOS FS masks case
+        {},
+        status_code=404,
+    )

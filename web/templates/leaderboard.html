@@ -19,14 +19,14 @@
         </thead>
         <tbody>
             {% for row in rows %}
-            <tr>
+            <tr data-bot="{{ row.versioned_name }}">
                 <td class="muted">{{ loop.index }}</td>
                 <td><a href="/bots/{{ row.base_name }}">{{ row.versioned_name }}</a></td>
                 <td class="stat-wins">{{ row.clean_wins }}</td>
                 <td class="{% if row.forfeit_wins > 0 %}stat-forfeit{% else %}muted{% endif %}">{{ row.forfeit_wins }}</td>
                 <td class="muted">{{ row.draws }}</td>
                 <td class="muted">{{ row.losses }}</td>
-                <td class="muted">{{ row.lifetime_wins }}&ndash;{{ row.lifetime_losses }}</td>
+                <td class="muted">{{ row.lifetime_wins }}-{{ row.lifetime_losses }}</td>
             </tr>
             {% endfor %}
         </tbody>

@@ -16,27 +16,31 @@ from runner.engine import MatchResult
 
 
 def _match_select() -> Any:
-    bx = Bot.__table__.alias("bx")
-    bo = Bot.__table__.alias("bo")
-    bw = Bot.__table__.alias("bw")
+    bx = Bot.__table__.alias("bx")  # pragma: no mutate -- cosmetic SQL alias
+    bo = Bot.__table__.alias("bo")  # pragma: no mutate
+    bw = Bot.__table__.alias("bw")  # pragma: no mutate
     return (
-        select(
-            Match.id,
-            bx.c.versioned_name.label("bot_x"),
-            bx.c.base_name.label("bot_x_base"),
-            bx.c.python_version.label("bot_x_python"),
-            bo.c.versioned_name.label("bot_o"),
-            bo.c.base_name.label("bot_o_base"),
-            bo.c.python_version.label("bot_o_python"),
-            bw.c.versioned_name.label("winner"),
-            Match.result,
-            Match.played_at,
-        )
-        .select_from(Match)
-        .join(bx, Match.bot_x_id == bx.c.id)
-        .join(bo, Match.bot_o_id == bo.c.id)
-        .outerjoin(bw, Match.winner_id == bw.c.id)
-    ), bx, bo
+        (
+            select(
+                Match.id,
+                bx.c.versioned_name.label("bot_x"),
+                bx.c.base_name.label("bot_x_base"),
+                bx.c.python_version.label("bot_x_python"),
+                bo.c.versioned_name.label("bot_o"),
+                bo.c.base_name.label("bot_o_base"),
+                bo.c.python_version.label("bot_o_python"),
+                bw.c.versioned_name.label("winner"),
+                Match.result,
+                Match.played_at,
+            )
+            .select_from(Match)
+            .join(bx, Match.bot_x_id == bx.c.id)
+            .join(bo, Match.bot_o_id == bo.c.id)
+            .outerjoin(bw, Match.winner_id == bw.c.id)
+        ),
+        bx,
+        bo,
+    )
 
 
 class MatchRepository:
@@ -76,7 +80,7 @@ class MatchRepository:
         return list(result.all())
 
     async def record(
-        self, bot_x_id: int, bot_o_id: int, result: MatchResult
+        self, bot_x_id: int, bot_o_id: int, result: MatchResult, correlation_id: str
     ) -> None:
         """Persist a completed match and its moves."""
         if result.result in ("x_wins", "o_forfeit"):
@@ -91,6 +95,7 @@ class MatchRepository:
             bot_o_id=bot_o_id,
             winner_id=winner_id,
             result=result.result,
+            correlation_id=correlation_id,
         )
         self._session.add(match)
         await self._session.flush()  # populates match.id
