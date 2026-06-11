@@ -17,6 +17,7 @@ dependencies = [
     # runner / web all use asyncpg exclusively.
     "aio-pika",
     "structlog>=26.1.0",
+    "pydantic>=2.13.4",
 ]
 
 [tool.uv]
@@ -53,6 +54,13 @@ mutate       = "mutmut run"
 [tool.poe.tasks.check]
 sequence = ["lint", "lint-md", "typecheck", "test"]
 
+[tool.poe.tasks.acceptance]
+# Live-stack acceptance tests. Requires the compose broker (and eventually
+# the kind dispatcher) running. `-o addopts=...` clears the default
+# `--ignore=tests/acceptance` and the coverage flags so this suite actually
+# collects + runs without coverage instrumentation.
+cmd = "pytest tests/acceptance/ -o addopts=--no-cov -v"
+
 [tool.ruff]
 target-version = "py311"
 exclude = ["bots/", "example_bots/", "alembic/versions/"]
@@ -66,9 +74,12 @@ ignore = ["ANN401"]
 "scripts/*" = ["ANN"]
 
 [tool.pytest.ini_options]
-addopts = "--cov=web --cov=db --cov=entities --cov=runner --cov=messaging --cov=scripts --cov-report=term-missing"
+addopts = "--cov=web --cov=db --cov=entities --cov=runner --cov=messaging --cov=scripts --cov-report=term-missing --ignore=tests/acceptance"
 asyncio_mode = "auto"
 norecursedirs = ["mutants"]
+markers = [
+    "acceptance: live-stack acceptance test against the running compose+k8s stack; opt-in via `poe acceptance`",
+]
 
 [tool.coverage.run]
 omit = ["bots/*", "tests/*", "example_bots/*"]

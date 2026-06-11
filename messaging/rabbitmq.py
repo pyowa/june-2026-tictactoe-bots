@@ -1,5 +1,3 @@
-import json
-from dataclasses import asdict
 from typing import Any
 
 import aio_pika
@@ -27,7 +25,7 @@ class RabbitMQQueue:
     async def enqueue_match(self, job: MatchJob) -> None:
         channel = await self._ensure_connected()
         message = aio_pika.Message(
-            body=json.dumps(asdict(job)).encode(),
+            body=job.model_dump_json().encode(),
             delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
             content_type="application/json",
         )

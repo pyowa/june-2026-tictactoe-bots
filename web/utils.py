@@ -137,12 +137,22 @@ async def enqueue_match_pairs(
     for other in all_bots:
         py = pick_python_version(new_python_version, other.python_version)
         await queue.enqueue_match(
-            MatchJob(new_bot_id, other.id, py, secrets.token_hex(16))
+            MatchJob(
+                bot_x_id=new_bot_id,
+                bot_o_id=other.id,
+                python_version=py,
+                correlation_id=secrets.token_hex(16),
+            )
         )
         count += 1
         if other.id != new_bot_id:
             await queue.enqueue_match(
-                MatchJob(other.id, new_bot_id, py, secrets.token_hex(16))
+                MatchJob(
+                    bot_x_id=other.id,
+                    bot_o_id=new_bot_id,
+                    python_version=py,
+                    correlation_id=secrets.token_hex(16),
+                )
             )
             count += 1
     return count

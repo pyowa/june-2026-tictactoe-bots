@@ -1,11 +1,13 @@
-from dataclasses import dataclass
 from typing import Protocol
+
+from pydantic import BaseModel, ConfigDict
 
 MATCHES_QUEUE = "matches.todo"
 
 
-@dataclass(frozen=True)
-class MatchJob:
+class MatchJob(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     bot_x_id: int
     bot_o_id: int
     python_version: str

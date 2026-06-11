@@ -213,6 +213,7 @@ Stack: FastAPI · SQLAlchemy 2.x (async, `asyncpg`) on Postgres · RabbitMQ (`ai
 | `uv run poe format` | Auto-format with ruff |
 | `uv run poe typecheck` | Type-check with ty |
 | `uv run poe check` | Run lint + lint-md + typecheck + test in sequence |
+| `uv run poe acceptance` | Live-stack acceptance tests against the running compose stack (publishes on `turn.requests`, asserts a reply). Opt-in — not part of `poe check`. |
 
 ### Mutation testing
 
