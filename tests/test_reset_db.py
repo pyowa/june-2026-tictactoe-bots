@@ -1,5 +1,6 @@
 import io
 import json
+import subprocess
 import urllib.error
 from collections.abc import AsyncIterator
 from email.message import Message
@@ -198,6 +199,57 @@ def test_purge_handles_timeout_error_on_get(
 
 
 # ---------------------------------------------------------------------------
+# delete_bot_pods
+# ---------------------------------------------------------------------------
+
+
+def test_delete_bot_pods_calls_kubectl(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.reset_db import delete_bot_pods
+
+    calls: list[Any] = []
+
+    def fake_run(*args: Any, **kwargs: Any) -> MagicMock:
+        calls.append(args[0])
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr(reset_db.subprocess, "run", fake_run)
+    delete_bot_pods()
+
+    assert calls == [["kubectl", "delete", "pods", "--all", "-n", "bots"]]
+    assert "Deleted bot pods" in capsys.readouterr().out
+
+
+def test_delete_bot_pods_skips_when_kubectl_not_found(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.reset_db import delete_bot_pods
+
+    def fake_run(*args: Any, **kwargs: Any) -> MagicMock:
+        raise FileNotFoundError("kubectl not found")
+
+    monkeypatch.setattr(reset_db.subprocess, "run", fake_run)
+    delete_bot_pods()
+
+    assert "kubectl not found" in capsys.readouterr().out
+
+
+def test_delete_bot_pods_skips_when_cluster_unreachable(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.reset_db import delete_bot_pods
+
+    def fake_run(*args: Any, **kwargs: Any) -> MagicMock:
+        raise subprocess.CalledProcessError(1, "kubectl")
+
+    monkeypatch.setattr(reset_db.subprocess, "run", fake_run)
+    delete_bot_pods()
+
+    assert "No k8s cluster reachable" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
 # main()
 # ---------------------------------------------------------------------------
 
@@ -208,7 +260,7 @@ async def test_main_drops_tables_runs_alembic_and_purges_queues(
     _bound_db: None,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    # Patch subprocess.run so alembic doesn't actually fire.
+    # Patch subprocess.run so alembic and kubectl don't actually fire.
     subprocess_calls: list[Any] = []
 
     def fake_subprocess_run(*args: Any, **kwargs: Any) -> MagicMock:
@@ -241,14 +293,17 @@ async def test_main_drops_tables_runs_alembic_and_purges_queues(
     assert present is not None
     assert all(v is None for v in present)
 
-    # alembic invoked exactly once with the expected args.
-    assert len(subprocess_calls) == 1
-    args, kwargs = subprocess_calls[0]
-    assert args[0] == ["alembic", "upgrade", "head"]
-    assert kwargs.get("check") is True
+    # alembic and kubectl both invoked.
+    assert len(subprocess_calls) == 2
+    alembic_args, alembic_kwargs = subprocess_calls[0]
+    assert alembic_args[0] == ["alembic", "upgrade", "head"]
+    assert alembic_kwargs.get("check") is True
+    kubectl_args, _ = subprocess_calls[1]
+    assert kubectl_args[0] == ["kubectl", "delete", "pods", "--all", "-n", "bots"]
 
     out = capsys.readouterr().out
     assert "Dropping all tables" in out
     assert "Running migrations" in out
     assert "Purging RabbitMQ queues" in out
+    assert "Deleting bot pods" in out
     assert "Done." in out

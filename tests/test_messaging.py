@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from messaging.log import configure_logging
-from messaging.routing import pick_python_version, turn_queue_for
+from messaging.routing import pick_python_version, pick_runtime_key, turn_queue_for
 from messaging.rpc_client import RpcClient
 
 # ---------------------------------------------------------------------------
@@ -57,6 +57,19 @@ def test_pick_python_version_handles_unparseable_input() -> None:
     # so a mutation that swaps the fallback can be caught.
     assert pick_python_version("garbage", "3.11") == "3.11"
     assert pick_python_version("3.11", "garbage") == "3.11"
+
+
+def test_pick_runtime_key_unparseable_version_falls_back_to_first() -> None:
+    # "python-xyz" can't be parsed as a version; the other side wins if parseable,
+    # otherwise the first arg is returned as a safe fallback.
+    assert pick_runtime_key("python-3.13", "python-bad") == "python-3.13"
+    assert pick_runtime_key("python-bad", "python-3.13") == "python-bad"
+
+
+def test_pick_runtime_key_non_python_family_falls_back_to_first() -> None:
+    # Keys that don't start with "python-" return () from python_tuple, so
+    # the `if ta and tb` branch is skipped and `a` is returned.
+    assert pick_runtime_key("rust-1.75", "python-3.13") == "rust-1.75"
 
 
 def test_turn_queue_for_strips_dots() -> None:
@@ -255,8 +268,12 @@ async def test_rabbitmq_queue_publishes_match_job_as_json() -> None:
 
     await queue.enqueue_match(
         MatchJob(
-            bot_x_id=1, bot_o_id=2, python_version="3.13", correlation_id="test-cid"
-        )  # noqa: E501
+            bot_x_id=1,
+            bot_o_id=2,
+            python_version="3.13",
+            runtime_key="python-3.13",
+            correlation_id="test-cid",
+        )
     )
 
     channel.default_exchange.publish.assert_awaited_once()
@@ -269,10 +286,38 @@ async def test_rabbitmq_queue_publishes_match_job_as_json() -> None:
         "bot_x_id": 1,
         "bot_o_id": 2,
         "python_version": "3.13",
+        "runtime_key": "python-3.13",
         "correlation_id": "test-cid",
     }
     # Durability + content-type contracts. Both can be silently broken
     # without changing visible behavior locally, so pin them.
+    assert message.delivery_mode == aio_pika.DeliveryMode.PERSISTENT
+    assert message.content_type == "application/json"
+
+
+async def test_rabbitmq_queue_publishes_build_pod_message_as_json() -> None:
+    import aio_pika
+
+    from messaging.contracts import BUILD_POD_QUEUE, BuildPodMessage
+    from messaging.rabbitmq import RabbitMQQueue
+
+    queue = RabbitMQQueue("amqp://unused")
+    channel = MagicMock()
+    channel.default_exchange.publish = AsyncMock()
+    queue._channel = channel
+    queue._connection = MagicMock(is_closed=False)
+
+    await queue.enqueue_build_pod(
+        BuildPodMessage(bot_id=42, runtime_key="python-3.13")
+    )
+
+    channel.default_exchange.publish.assert_awaited_once()
+    args = channel.default_exchange.publish.call_args
+    message = args[0][0]
+    routing_key = args[1]["routing_key"]
+    assert routing_key == BUILD_POD_QUEUE
+    payload = json.loads(message.body)
+    assert payload == {"bot_id": 42, "runtime_key": "python-3.13"}
     assert message.delivery_mode == aio_pika.DeliveryMode.PERSISTENT
     assert message.content_type == "application/json"
 
@@ -338,10 +383,15 @@ async def test_ensure_connected_opens_connection_when_none() -> None:
     ) as mock_connect:
         channel = await queue._ensure_connected()
 
+    from messaging.contracts import BUILD_POD_QUEUE
     from messaging.queue import MATCHES_QUEUE
 
     mock_connect.assert_awaited_once_with("amqp://test")
-    mock_channel.declare_queue.assert_awaited_once_with(MATCHES_QUEUE, durable=True)
+    declared = [
+        call.args for call in mock_channel.declare_queue.await_args_list
+    ]
+    assert (MATCHES_QUEUE,) in declared
+    assert (BUILD_POD_QUEUE,) in declared
     assert channel is mock_channel
     assert queue._connection is mock_connection
 

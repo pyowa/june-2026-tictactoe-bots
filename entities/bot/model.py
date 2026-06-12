@@ -23,6 +23,11 @@ class Bot(Base):
     # retired and only the event-driven workers (which require this) consume it.
     source: Mapped[bytes | None] = mapped_column(deferred=True)
     python_version: Mapped[str] = mapped_column(default="3", server_default="3")
+    runtime_key: Mapped[str] = mapped_column(
+        default="python-3.14", server_default="'python-3.14'"
+    )
+    pod_name: Mapped[str | None] = mapped_column(default=None)
+    pod_ready: Mapped[bool] = mapped_column(default=False, server_default="false")
     submitted_at: Mapped[datetime] = mapped_column(
         server_default=func.current_timestamp(),
     )

@@ -10,16 +10,16 @@ A bot is a single `.py` file. The runner invokes it once per move: it gets the c
 
 ### Required docstring
 
-The very first thing in your file must be a docstring with a `name:` field. Optionally, set `python:` to pin a Python version (defaults to the latest Python 3).
+The very first thing in your file must be a docstring with a `name:` field. Optionally, set `language:` to pin a runtime (defaults to the latest Python 3).
 
 ```python
 """
 name: My Awesome Bot
-python: 3.11
+language: python-3.13
 """
 ```
 
-Valid `python:` values are the actively supported Python releases: **`3.10`, `3.11`, `3.12`, `3.13`, `3.14`**. Omit the field and you'll get `3.14` (the latest). Anything else — a bare `3`, an unsupported `3.9`, `latest`, etc. — is rejected at upload.
+Valid `language:` keys are the entries in the server-side allowlist: **`python-3.10`, `python-3.11`, `python-3.12`, `python-3.13`, `python-3.14`** (and future non-Python runtimes as they are added). Omit the field and you'll get `python-3.14`. The legacy `python: 3.13` form is still accepted as an alias. Anything unrecognised is rejected at upload.
 
 ### I/O protocol
 
@@ -81,6 +81,8 @@ Open the web UI at `http://localhost:8000` and upload your `.py` file. The first
 
 ### Prerequisites
 
+#### TODO: use nix for this so the only real prereq is nix
+
 - [uv](https://docs.astral.sh/uv/) (Python package manager)
 - Python 3.11+
 - Docker (runs Postgres and RabbitMQ locally; also sandboxes each match)
@@ -92,10 +94,10 @@ git clone <repo>
 cd tic-tac-toe-event
 uv sync --group dev
 
-docker compose up -d    # build + start the whole stack (db, rabbitmq, web, orchestrator, the worker fleet)
+docker compose up -d    # build + start the whole stack (db, rabbitmq, web, match_scheduler)
 ```
 
-Migrations run automatically — the compose `migrate` service waits for Postgres to be healthy, runs `alembic upgrade head`, exits, and `web`/`orchestrator` only start once it succeeds. To re-run after editing a migration, `docker compose run --rm migrate` (or `docker compose up -d migrate`).
+Migrations run automatically — the compose `migrate` service waits for Postgres to be healthy, runs `alembic upgrade head`, exits, and `web` only starts once it succeeds. To re-run after editing a migration, `docker compose run --rm migrate` (or `docker compose up -d migrate`).
 
 Defaults: Postgres at `postgresql+asyncpg://ttt:ttt@localhost:5432/ttt`, RabbitMQ at `amqp://guest:guest@localhost:5672/`. Inside containers the services talk via service names (`db`, `rabbitmq`); on the host they're at `localhost`. Override via `DATABASE_URL` / `RABBITMQ_URL`.
 
@@ -105,9 +107,44 @@ Defaults: Postgres at `postgresql+asyncpg://ttt:ttt@localhost:5432/ttt`, RabbitM
 docker compose up -d
 ```
 
-Brings up Postgres, RabbitMQ, the one-shot `migrate` job, web, orchestrator, and the per-Python-version turn workers in the background. Open `http://localhost:8000`. Stream logs from any service with `docker compose logs -f <service>` (e.g. `web`, `orchestrator`, `worker-py312`). `docker compose down` stops everything. RabbitMQ's management UI is at `http://localhost:15672` (`guest`/`guest`).
+Brings up Postgres, RabbitMQ, the one-shot `migrate` job, web, and `match_scheduler` in the background. Open `http://localhost:8000`. Stream logs from any service with `docker compose logs -f <service>` (e.g. `web`, `match_scheduler`). `docker compose down` stops everything. RabbitMQ's management UI is at `http://localhost:15672` (`guest`/`guest`).
 
-Source code is bind-mounted into the containers, so editing files under `web/`, `runner/`, `db/`, or `messaging/` is picked up immediately by the web server's `--reload`. The orchestrator and workers don't auto-reload — restart them with `docker compose restart orchestrator worker-py310 worker-py311 worker-py312 worker-py313 worker-py314` after editing their code. Only `pyproject.toml` / `uv.lock` changes require a `docker compose build`.
+Source code is bind-mounted into the containers, so editing files under `web/`, `db/`, or `messaging/` is picked up immediately by the web server's `--reload`. `match_scheduler` does not auto-reload — restart it with `docker compose restart match_scheduler` after editing its code. Only `pyproject.toml` / `uv.lock` changes require a `docker compose build`.
+
+### Start the Kubernetes cluster (dispatcher)
+
+Bot pods and match execution run inside a local [kind](https://kind.sigs.k8s.io/) cluster. Use the `nix develop` shell — it provides `kind`, `kubectl`, and all other tooling.
+
+```bash
+# Build the dispatcher and all bot-runner images (one per Python version)
+uv run poe build-images
+
+# Create the cluster, apply RBAC + NetworkPolicy, deploy the dispatcher
+uv run poe kind-up
+
+# Load the images into kind (kind nodes can't pull from the host registry)
+uv run poe kind-load
+```
+
+The dispatcher connects back to the host's RabbitMQ and Postgres via `host.docker.internal`. Stream its logs with:
+
+```bash
+kubectl logs -n bots -l app=dispatcher -f
+```
+
+After changing dispatcher code, rebuild and redeploy:
+
+```bash
+docker build -t pyowa/dispatcher:latest --target dispatcher .
+uv run poe kind-load
+kubectl rollout restart deployment/dispatcher -n bots
+```
+
+Tear the cluster down entirely:
+
+```bash
+uv run poe kind-down
+```
 
 ---
 
@@ -115,7 +152,7 @@ Source code is bind-mounted into the containers, so editing files under `web/`, 
 
 ### Local architecture
 
-Everything runs in Docker Compose: `db` (Postgres), `rabbitmq`, `web`, `orchestrator`, and one `worker-pyX.Y` service per supported Python version (currently 3.10 through 3.14). The browser talks to the web; everything else talks via Postgres + RabbitMQ. Services find each other by service name (`db`, `rabbitmq`) over the compose network. Externally only the broker ports, the DB port, and `http://localhost:8000` are exposed.
+Everything runs in Docker Compose: `db` (Postgres), `rabbitmq`, `web`, and `match_scheduler`. The browser talks to the web; everything else talks via Postgres + RabbitMQ. Services find each other by service name (`db`, `rabbitmq`) over the compose network. Externally only the broker ports, the DB port, and `http://localhost:8000` are exposed. The `dispatcher` (running in the k8s cluster) handles all bot pod lifecycle and match execution.
 
 #### 1. Uploading a bot
 
@@ -130,7 +167,7 @@ sequenceDiagram
     Browser->>Web: POST /submit (.py)
     Web->>Web: parse docstring,<br/>extract name + python version
     Web->>DB: INSERT bot row + source bytes
-    Web->>RMQ: publish MatchJob per unplayed pair<br/>(matches.todo)
+    Web->>RMQ: publish BuildPodMessage<br/>(matches.build)
     Web-->>Browser: HTML "submitted successfully"
 ```
 
@@ -153,67 +190,114 @@ sequenceDiagram
     end
 ```
 
-#### 3. Running a match
+#### 3. Building a bot pod
 
-One `MatchJob` on `matches.todo` produces one match. The orchestrator drives the game loop, RPC-ing each turn to the right per-Python-version worker queue and waiting on its reply queue.
+When a bot is uploaded, `pod_builder` (running in the k8s dispatcher) picks up the `BuildPodMessage` and creates a permanent pod for that bot. The pod lives for the lifetime of the bot — one pod per bot, not one per match.
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant RMQ as RabbitMQ
-    participant Orch as Orchestrator
+    participant PB as pod_builder (dispatcher)
     participant DB as Postgres
-    participant Worker as Turn worker (pyX.Y)
+    participant Pod as Bot Pod
 
-    RMQ->>Orch: deliver MatchJob from matches.todo
-    Orch->>DB: get bots
-
-    loop For each turn (up to 9)
-        Orch->>RMQ: publish turn request<br/>(turn.pyXY.requests, with correlation_id)
-        RMQ->>Worker: deliver
-        Worker->>Worker: write tmpfile,<br/>run `python bot.py`<br/>(stdin = board, timeout)
-        Worker->>RMQ: publish reply<br/>(orchestrator's reply queue)
-        RMQ->>Orch: deliver reply
-        Orch->>Orch: validate move,<br/>check winner / draw
-    end
-
-    Orch->>DB: INSERT match + moves
-    Orch->>RMQ: ack matches.todo message
+    RMQ->>PB: deliver BuildPodMessage from matches.build
+    PB->>Pod: create Pod (bot source baked in via SOURCE_B64)
+    PB->>Pod: wait for GET /health ready
+    PB->>DB: UPDATE bot SET pod_ready=True
+    PB->>RMQ: publish PodReadyMessage<br/>(matches.schedule)
 ```
 
-Web, orchestrator, and the worker fleet all run as compose services alongside Postgres and RabbitMQ — built from a single multi-stage `Dockerfile` with three targets (`web`, `orchestrator`, `worker`). The orchestrator is Python-version-agnostic; each turn worker is bound to one Python version and only consumes its own `turn.pyXY.requests` queue. The compose file declares one `worker-pyX.Y` service per supported version (3.10, 3.11, 3.12, 3.13, 3.14), each built from the same `worker` target but with a different `PY_VERSION` build arg so its base image matches its queue. Adding another version means adding one more `worker-pyX.Y` block and listing the version in `web/main.py`'s `SUPPORTED_PYTHON_VERSIONS`.
+#### 4. Scheduling matches
+
+Once a bot's pod is ready, `match_scheduler` pairs it against every other ready bot.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant RMQ as RabbitMQ
+    participant Sched as match_scheduler
+    participant DB as Postgres
+
+    RMQ->>Sched: deliver PodReadyMessage from matches.schedule
+    Sched->>DB: query all bots where pod_ready=True
+    loop For each ready-bot pairing
+        Sched->>RMQ: publish MatchOndeck<br/>(matches.ondeck)
+    end
+```
+
+#### 5. Running a match
+
+Each `MatchOndeck` message drives one match. The `ondeck_handler` (running in the k8s dispatcher) fetches both bots from Postgres and drives the game loop via HTTP to their existing pods.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant RMQ as RabbitMQ
+    participant OH as ondeck_handler (dispatcher)
+    participant DB as Postgres
+    participant PodX as Bot-X Pod
+    participant PodO as Bot-O Pod
+
+    RMQ->>OH: deliver MatchOndeck from matches.ondeck
+    OH->>DB: fetch both bots
+
+    loop For each turn (up to 9)
+        OH->>PodX: POST /turn {symbol, board}
+        PodX->>PodX: run bot subprocess
+        PodX-->>OH: {board} or {error}
+        OH->>OH: validate move,<br/>check winner / draw
+        OH->>PodO: POST /turn {symbol, board}
+        PodO->>PodO: run bot subprocess
+        PodO-->>OH: {board} or {error}
+    end
+
+    OH->>DB: INSERT match + moves
+    OH->>RMQ: ack matches.ondeck message
+```
+
+`web` and `match_scheduler` run as compose services alongside Postgres and RabbitMQ — built from a single multi-stage `Dockerfile`. The dispatcher runs inside the k8s cluster and hosts two concurrent consumers: `pod_builder` (creates permanent bot pods, marks them ready) and `ondeck_handler` (drives match game loops against existing pods). The server-side allowlist of runtimes lives in `web/runtimes.py`.
 
 ### Project layout
 
 ```text
 tic-tac-toe-event/
-├── web/            # FastAPI app (submission UI, leaderboard, matches)
-├── runner/         # orchestrator.py + turn_worker.py (broker entrypoints) · dispatch.py (per-match handling) · match_loop.py (per-turn RPC loop) · bot_subprocess.py (bot tmpfile + subprocess) · engine.py (pure board logic)
-├── entities/       # Per-entity packages — each has model.py (ORM columns) + repository.py (every query that returns rows of that shape). bot/, match/, move/.
-├── db/             # base.py (DeclarativeBase) + session.py (async engine, session factory, get_session helper). No queries live here.
-├── messaging/      # Queue + RPC abstraction; RabbitMQ implementation
-├── example_bots/   # Reference bots; `poe seed-examples` loads these into the DB
-├── alembic/        # Migration scripts (versions/)
-└── tests/          # Test suite
+├── web/                       # FastAPI app (submission UI, leaderboard, matches)
+├── runner/                    # engine.py (pure board logic)
+├── dispatcher/                # main.py (k8s dispatcher entrypoint) · pod_builder.py (creates permanent bot pods) · ondeck_handler.py (drives match game loops) · pods.py (pod lifecycle helpers)
+├── match_scheduler/           # main.py — compose service; consumes matches.schedule, publishes MatchOndeck per pairing to matches.ondeck
+├── bot-runner-images/python/  # turn_server.py HTTP server + Dockerfile for warm bot pods
+├── entities/                  # Per-entity packages — each has model.py (ORM columns) + repository.py (every query that returns rows of that shape). bot/, match/, move/.
+├── db/                        # base.py (DeclarativeBase) + session.py (async engine, session factory, get_session helper). No queries live here.
+├── messaging/                 # Queue + RPC abstraction; RabbitMQ implementation; contracts.py
+├── k8s/                       # Kubernetes manifests (NetworkPolicy, dispatcher Deployment/Role/etc.)
+├── example_bots/              # Reference bots; `poe seed-examples` loads these into the DB
+├── alembic/                   # Migration scripts (versions/)
+└── tests/                     # Test suite
 ```
 
-Database access uses **per-entity repositories**: a `BotRepository(session)`, `MatchRepository(session)`, or `MoveRepository(session)` co-locates every query that returns rows shaped like that entity. Cross-entity queries (the leaderboard joins bots + matches; it returns Bot-shaped rows, so it lives on `BotRepository`) live with the entity they project. Routes receive a repo via FastAPI `Depends(get_bots)` (defined in `web/dependencies.py`); tests substitute fakes with `app.dependency_overrides[get_bots] = lambda: ...`. Non-route callers (orchestrator, scripts) open a session with `async with get_session() as session: BotRepository(session)`.
+Database access uses **per-entity repositories**: a `BotRepository(session)`, `MatchRepository(session)`, or `MoveRepository(session)` co-locates every query that returns rows shaped like that entity. Cross-entity queries (the leaderboard joins bots + matches; it returns Bot-shaped rows, so it lives on `BotRepository`) live with the entity they project. Routes receive a repo via FastAPI `Depends(get_bots)` (defined in `web/dependencies.py`); tests substitute fakes with `app.dependency_overrides[get_bots] = lambda: ...`. Non-route callers (match_scheduler, scripts) open a session with `async with get_session() as session: BotRepository(session)`.
 
-Stack: FastAPI · SQLAlchemy 2.x (async, `asyncpg`) on Postgres · RabbitMQ (`aio-pika`) for match queueing + per-turn RPC · Alembic for migrations · Docker Compose for the entire stack (Postgres, RabbitMQ, web, orchestrator, one turn worker per supported Python version) — web/orchestrator/worker built from a single multi-stage `Dockerfile`. Tests use a recording in-memory queue and an isolated `ttt_test` database on the running Postgres.
+Stack: FastAPI · SQLAlchemy 2.x (async, `asyncpg`) on Postgres · RabbitMQ (`aio-pika`) for match queueing · Alembic for migrations · Docker Compose for the local stack (Postgres, RabbitMQ, web, match_scheduler) — built from a single multi-stage `Dockerfile`. The dispatcher runs in Kubernetes and hosts `pod_builder` and `ondeck_handler` as concurrent consumers. Tests use a recording in-memory queue and an isolated `ttt_test` database on the running Postgres.
 
 ### Common tasks
 
 | Command | Description |
 |---|---|
 | `uv run poe reset-db` | Drop & recreate the DB **and** purge every RabbitMQ queue (so no stale match jobs linger from the previous DB) |
-| `uv run poe seed-examples` | Wipe bots/matches/moves, insert every file under `example_bots/` as a bot (multiple files sharing a `name:` auto-version), then enqueue every bot pair on `matches.todo` |
+| `uv run poe seed-examples` | Wipe bots/matches/moves, insert every file under `example_bots/` as a bot (multiple files sharing a `name:` auto-version), then publish `BuildPodMessage` for each bot on `matches.build` |
 | `uv run poe test` | Run the test suite with coverage |
 | `uv run poe lint` | Check code with ruff |
 | `uv run poe lint-md` | Lint Markdown files with pymarkdown |
 | `uv run poe format` | Auto-format with ruff |
 | `uv run poe typecheck` | Type-check with ty |
 | `uv run poe check` | Run lint + lint-md + typecheck + test in sequence |
-| `uv run poe acceptance` | Live-stack acceptance tests against the running compose stack (publishes on `turn.requests`, asserts a reply). Opt-in — not part of `poe check`. |
+| `uv run poe acceptance` | Live-stack acceptance tests against the running compose+k8s stack. Opt-in — not part of `poe check`. |
+| `uv run poe build-images` | Build the dispatcher and all bot-runner images (one per Python version) |
+| `uv run poe kind-load` | Load locally built images into the kind cluster |
+| `uv run poe kind-up` | Create the kind cluster, apply RBAC + NetworkPolicy, deploy the dispatcher (idempotent) |
+| `uv run poe kind-down` | Destroy the kind cluster |
 
 ### Mutation testing
 
@@ -242,19 +326,17 @@ docker compose run --rm migrate
 
 ### How matches run
 
-A match starts as a message on `matches.todo`. The web app publishes one per ordered pair `(X, O)` — including each bot's self-pair, which catches strategies that misbehave when mirrored — whenever a bot is uploaded. `seed-examples` publishes the full N×N set at once.
+When a bot is uploaded, the platform provisions a **permanent pod** for it and then schedules it against every other ready bot. Pods are created once per bot — not once per match.
 
-The **orchestrator** consumes those messages and drives the game loop:
+The four-step flow:
 
-1. Fetch both bots' source bytes from Postgres.
-2. For each turn (X then O, alternating), publish an RPC request on `turn.pyX.Y.requests` carrying `{symbol, board, source}` and a correlation id; wait for the reply on the orchestrator's exclusive reply queue.
-3. Validate the worker's response: parseable 3×3 board, exactly one new piece, correct symbol, nothing overwritten.
-4. Check for a win (three in a row / column / diagonal) or a cat game.
-5. Swap symbols and repeat until the game ends.
+1. **Bot upload → pod build.** Web saves the bot to Postgres and publishes a `BuildPodMessage` on `matches.build`. The `pod_builder` consumer (running in the k8s dispatcher) picks this up, creates a pod running `turn_server.py` with the bot source baked in via `SOURCE_B64`, waits for it to pass its `GET /health` readiness check, marks `pod_ready=True` in Postgres, and publishes a `PodReadyMessage` on `matches.schedule`.
 
-The **turn worker** (one per supported Python version) receives each turn, writes the source to a tmpfile, runs `python <tmpfile>` as a subprocess with the symbol + board piped to stdin (subject to a per-move timeout), and publishes whatever the bot printed back to the orchestrator.
+2. **Pod ready → match scheduling.** The `match_scheduler` compose service consumes `matches.schedule`, queries Postgres for all bots with `pod_ready=True`, and publishes a `MatchOndeck` message on `matches.ondeck` for every ordered pairing `(X, O)` involving the newly ready bot — including self-pairs, which catch strategies that misbehave when mirrored. `seed-examples` publishes the full N×N set at once.
 
-Any validation failure, exception, or timeout is an immediate forfeit for whichever bot was on the move. The orchestrator persists every move + the final outcome so matches can be replayed from the UI.
+3. **Match execution.** The `ondeck_handler` consumer (also running in the k8s dispatcher) picks up each `MatchOndeck`, fetches both bots from Postgres, and drives the game loop by POSTing to each bot's existing pod at `POST /turn` with `{symbol, board}` for each turn.
+
+4. **Validation and persistence.** After each turn the handler validates the response: parseable 3×3 board, exactly one new piece, correct symbol, nothing overwritten. Any validation failure, HTTP error, or timeout is an immediate forfeit for whichever bot was on the move. When the game ends (win, draw, or forfeit) the handler writes every move and the final outcome to Postgres so matches can be replayed from the UI.
 
 ---
 

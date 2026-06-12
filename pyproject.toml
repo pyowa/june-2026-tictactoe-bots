@@ -24,6 +24,9 @@ dependencies = [
 package = false
 
 [dependency-groups]
+dispatcher = [
+    "kubernetes>=30.0",
+]
 dev = [
     "pytest",
     "pytest-asyncio",
@@ -39,6 +42,8 @@ dev = [
     "psycopg2-binary",
     "mutmut>=3.5.0",
     "beautifulsoup4>=4.15.0",
+    # needed for dispatcher unit tests
+    {include-group = "dispatcher"},
 ]
 
 [tool.poe.tasks]
@@ -55,11 +60,51 @@ mutate       = "mutmut run"
 sequence = ["lint", "lint-md", "typecheck", "test"]
 
 [tool.poe.tasks.acceptance]
-# Live-stack acceptance tests. Requires the compose broker (and eventually
-# the kind dispatcher) running. `-o addopts=...` clears the default
-# `--ignore=tests/acceptance` and the coverage flags so this suite actually
-# collects + runs without coverage instrumentation.
+# Live-stack acceptance tests. Requires the compose broker and either the
+# compose worker or the kind dispatcher running.
 cmd = "pytest tests/acceptance/ -o addopts=--no-cov -v"
+
+[tool.poe.tasks.kind-up]
+# Create the kind cluster (idempotent — skips if already exists).
+shell = """
+nix develop --command sh -c '
+  kind get clusters 2>/dev/null | grep -q "^kind$" \
+    && echo "cluster already exists" \
+    || kind create cluster --config k8s/kind-cluster.yaml
+  kubectl create namespace bots --dry-run=client -o yaml | kubectl apply -f -
+  kubectl apply -f k8s/network-policy.yaml
+  kubectl apply -f k8s/dispatcher/ServiceAccount.yaml
+  kubectl apply -f k8s/dispatcher/Role.yaml
+  kubectl apply -f k8s/dispatcher/RoleBinding.yaml
+  kubectl apply -f k8s/dispatcher/Deployment.yaml
+'
+"""
+
+[tool.poe.tasks.kind-down]
+# Destroy the kind cluster.
+shell = "nix develop --command kind delete cluster"
+
+[tool.poe.tasks.build-images]
+# Build bot-runner images for all supported Python versions and the dispatcher.
+shell = """
+set -e
+for ver in 3.10 3.11 3.12 3.13 3.14; do
+  docker build -t pyowa/bot-runner-python:${ver} \
+    --build-arg PY_VERSION=${ver} \
+    bot-runner-images/python/
+done
+docker build -t pyowa/dispatcher:latest --target dispatcher .
+"""
+
+[tool.poe.tasks.kind-load]
+# Load locally built images into the kind cluster.
+shell = """
+set -e
+for ver in 3.10 3.11 3.12 3.13 3.14; do
+  nix develop --command kind load docker-image pyowa/bot-runner-python:${ver}
+done
+nix develop --command kind load docker-image pyowa/dispatcher:latest
+"""
 
 [tool.ruff]
 target-version = "py311"
@@ -116,8 +161,6 @@ paths_to_mutate = [
 # or live-database wiring that cannot be unit-tested without a real service.
 # These files are already excluded from coverage via `# pragma: no cover`.
 do_not_mutate = [
-    "runner/orchestrator.py",
-    "runner/turn_worker.py",
     "messaging/connection.py",
     "messaging/rpc_server.py",
     "scripts/reset_db.py",

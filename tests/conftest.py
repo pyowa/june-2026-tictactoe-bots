@@ -19,6 +19,7 @@ from db.base import Base
 from entities.bot.model import Bot
 from entities.match.model import Match
 from entities.move.model import Move
+from messaging.contracts import BuildPodMessage
 from messaging.queue import MatchJob
 from web.dependencies import get_queue
 
@@ -115,13 +116,17 @@ async def engine() -> AsyncIterator[AsyncEngine]:
 
 
 class _RecordingQueue:
-    """Captures published `MatchJob`s so tests can assert without a real broker."""
+    """Captures published messages so tests can assert without a real broker."""
 
     def __init__(self) -> None:
         self.messages: list[MatchJob] = []
+        self.build_pod_messages: list[BuildPodMessage] = []
 
     async def enqueue_match(self, job: MatchJob) -> None:
         self.messages.append(job)
+
+    async def enqueue_build_pod(self, msg: BuildPodMessage) -> None:
+        self.build_pod_messages.append(msg)
 
 
 @pytest.fixture()
@@ -160,7 +165,13 @@ async def db_insert_bot(
     python_version: str = "3",
     version: int = 1,
     versioned_name: str | None = None,
+    runtime_key: str | None = None,
 ) -> int:
+    from web.runtimes import DEFAULT_RUNTIME_KEY, RUNTIMES
+
+    if runtime_key is None:
+        candidate = f"python-{python_version}"
+        runtime_key = candidate if candidate in RUNTIMES else DEFAULT_RUNTIME_KEY
     factory = await _async_session_for(engine)
     async with factory() as session:
         bot = Bot(
@@ -169,6 +180,7 @@ async def db_insert_bot(
             version=version,
             owner_token="token",
             python_version=python_version,
+            runtime_key=runtime_key,
         )
         if submitted_at is not None:
             bot.submitted_at = datetime.fromisoformat(submitted_at)

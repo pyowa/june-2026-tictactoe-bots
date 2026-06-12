@@ -35,8 +35,9 @@ RABBITMQ_PASS = "guest"
 def purge_rabbitmq_queues() -> None:
     """Empty every queue on the default vhost via the management HTTP API.
 
-    Stale messages on `matches.todo` referencing dropped DB rows are the
-    most common source of confusion after a reset, so this is bundled in."""
+    Stale messages on `matches.build`, `matches.ondeck`, etc. referencing
+    dropped DB rows are the most common source of confusion after a reset,
+    so this is bundled in."""
     auth = base64.b64encode(f"{RABBITMQ_USER}:{RABBITMQ_PASS}".encode()).decode()
     auth_header = f"Basic {auth}"
 
@@ -91,6 +92,23 @@ async def _drop_all_tables() -> None:
     await engine.dispose()
 
 
+def delete_bot_pods() -> None:
+    """Delete all bot pods from the k8s bots namespace.
+
+    Skips gracefully when kubectl is not on PATH or no cluster is reachable."""
+    try:
+        subprocess.run(
+            ["kubectl", "delete", "pods", "--all", "-n", "bots"],
+            check=True,
+            capture_output=True,
+        )
+        print("  Deleted bot pods from k8s bots namespace.")
+    except FileNotFoundError:
+        print("  Skipping pod deletion: kubectl not found.")
+    except subprocess.CalledProcessError:
+        print("  Skipping pod deletion: No k8s cluster reachable.")
+
+
 async def main() -> None:
     print(f"Dropping all tables in {db.session.DATABASE_URL}...")
     await _drop_all_tables()
@@ -101,6 +119,9 @@ async def main() -> None:
 
     print(f"Purging RabbitMQ queues at {RABBITMQ_MGMT_URL}...")
     purge_rabbitmq_queues()
+
+    print("Deleting bot pods from k8s...")
+    delete_bot_pods()
 
     print("Done.")
 

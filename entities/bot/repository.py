@@ -70,6 +70,7 @@ class BotRepository:
         version: int,
         owner_token: str,
         python_version: str = "3",
+        runtime_key: str = "python-3.14",
         source: bytes | None = None,
     ) -> Bot:
         """Insert a new bot row. Flushes so `bot.id` is populated; the caller
@@ -80,11 +81,25 @@ class BotRepository:
             version=version,
             owner_token=owner_token,
             python_version=python_version,
+            runtime_key=runtime_key,
             source=source,
         )
         self._session.add(bot)
         await self._session.commit()
         return bot
+
+    async def ready_bots(self) -> list[Bot]:
+        result = await self._session.scalars(
+            select(Bot).where(Bot.pod_ready.is_(True))
+        )
+        return list(result.all())
+
+    async def set_pod_ready(self, bot_id: int, pod_name: str) -> None:
+        bot = await self._session.get(Bot, bot_id)
+        if bot is not None:
+            bot.pod_ready = True
+            bot.pod_name = pod_name
+            await self._session.commit()
 
     async def leaderboard(self) -> list[Row[Any]]:
         # Mirror the original raw SQL's structure exactly: two CTEs (latest-version

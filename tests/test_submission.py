@@ -343,68 +343,16 @@ async def test_resubmit_stores_each_version_separately_in_db(client, engine):
 
 
 def test_upload_logs_bot_uploaded_event(client, mock_queue) -> None:
+    from web.runtimes import DEFAULT_RUNTIME_KEY
+
     with capture_logs() as cap:
         upload(client, "LogBot")
     uploaded = [e for e in cap if e["event"] == "bot_uploaded"]
     assert len(uploaded) == 1
     assert uploaded[0]["bot_name"] == "LogBot"
-    assert uploaded[0]["jobs_enqueued"] == 1
+    assert uploaded[0]["runtime_key"] == DEFAULT_RUNTIME_KEY
     assert "bot_id" in uploaded[0]
     assert "python_version" in uploaded[0]
-
-
-def test_first_upload_enqueues_only_self_pair(client, mock_queue):
-    from web.utils import DEFAULT_PYTHON_VERSION
-
-    upload(client, "Solo")
-    assert len(mock_queue.messages) == 1
-    job = mock_queue.messages[0]
-    assert job.bot_x_id == job.bot_o_id  # self-pair
-    assert job.python_version == DEFAULT_PYTHON_VERSION
-
-
-def test_second_upload_enqueues_three_jobs(client, mock_queue):
-    """With two bots in the DB, a new upload should produce:
-    self-pair + (new vs existing) + (existing vs new) = 3 messages."""
-    upload(client, "Alpha")
-    mock_queue.messages.clear()  # ignore Alpha's own self-pair
-    upload(client, "Beta")
-    pairs = {(m.bot_x_id, m.bot_o_id) for m in mock_queue.messages}
-    assert len(pairs) == 3
-    # Beta's id is 2, Alpha is 1.
-    assert (2, 2) in pairs  # self
-    assert (2, 1) in pairs  # Beta as X
-    assert (1, 2) in pairs  # Beta as O
-
-
-def test_enqueue_picks_higher_python_version(client, mock_queue):
-    """When two bots declare different python versions, the higher one wins."""
-    client.post(
-        "/submit",
-        files={
-            "file": (
-                "alpha.py",
-                b'"""\nname: Alpha\npython: 3.11\n"""\nimport sys\n',
-                "text/plain",
-            )
-        },
-    )
-    mock_queue.messages.clear()
-    client.post(
-        "/submit",
-        files={
-            "file": (
-                "beta.py",
-                b'"""\nname: Beta\npython: 3.13\n"""\nimport sys\n',
-                "text/plain",
-            )
-        },
-    )
-    # Every cross-pair message should be tagged with the higher version.
-    cross = [m for m in mock_queue.messages if m.bot_x_id != m.bot_o_id]
-    assert cross, "expected at least one cross-pair message"
-    for m in cross:
-        assert m.python_version == "3.13"
 
 
 # ---------------------------------------------------------------------------
@@ -466,11 +414,9 @@ def test_reserved_name_error_message_exact(client) -> None:
 def test_invalid_python_version_error_message_exact(client) -> None:
     source = b'"""\nname: MyBot\npython: 3.9\n"""\nimport sys\n'
     resp = client.post("/submit", files={"file": ("bot.py", source, "text/plain")})
-    # Same anchoring strategy: include the element-open boundary for the first
-    # string, and the sentence boundary ("docstring. Use") for the second.
     text = html.unescape(resp.text)
-    assert "banner-error\">Invalid 'python:' value in docstring." in text
-    assert "docstring. Use a version like '3', '3.11', or '3.12'." in text
+    assert "banner-error\">Invalid runtime in docstring." in text
+    assert "'language: python-3.13' or 'python: 3.13'" in text
 
 
 # ---------------------------------------------------------------------------
@@ -524,36 +470,47 @@ def test_encode_cookie_percent_encodes_forward_slash() -> None:
 
 
 # ---------------------------------------------------------------------------
-# enqueue_match_pairs — correlation_id length and return count
+# enqueue_match_pairs — correlation_id length (direct unit test)
 # ---------------------------------------------------------------------------
 
 
-def test_correlation_id_in_enqueued_jobs_is_32_hex_chars(client, mock_queue) -> None:
-    """All MatchJob correlation_ids — including reverse-pair jobs — must be
-    exactly 32 hex chars (token_hex(16) = 16 bytes × 2 chars/byte).
-    token_hex(None) gives 64 chars; token_hex(17) gives 34 chars; None gives
-    an error. Two-bot upload exercises the reverse-pair branch."""
-    upload(client, "CorrBot")
-    upload(client, "AnotherBot")  # triggers reverse-pair jobs (other.id != new_bot_id)
-    for job in mock_queue.messages:
+@pytest.mark.asyncio
+async def test_enqueue_match_pairs_correlation_ids_are_32_hex_chars() -> None:
+    """All MatchJob correlation_ids must be exactly 32 hex chars (token_hex(16))."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from messaging.queue import MatchJob
+    from web.utils import enqueue_match_pairs
+
+    mock_a = MagicMock()
+    mock_a.id = 1
+    mock_a.runtime_key = "python-3.14"
+
+    mock_b = MagicMock()
+    mock_b.id = 2
+    mock_b.runtime_key = "python-3.14"
+
+    mock_bots = MagicMock()
+    mock_bots.all = AsyncMock(return_value=[mock_a, mock_b])
+
+    recorded: list[MatchJob] = []
+
+    class _Q:
+        async def enqueue_match(self, job: MatchJob) -> None:
+            recorded.append(job)
+
+        async def enqueue_build_pod(self, msg: object) -> None:  # pragma: no cover
+            pass
+
+    await enqueue_match_pairs(_Q(), mock_bots, 2, "python-3.14")
+    assert recorded, "expected at least one MatchJob"
+    for job in recorded:
         assert job.correlation_id is not None
         assert len(job.correlation_id) == 32, (
             f"correlation_id {job.correlation_id!r} has length "
             f"{len(job.correlation_id)}, expected 32"
         )
         assert all(c in "0123456789abcdef" for c in job.correlation_id)
-
-
-def test_enqueue_match_pairs_logs_correct_count_for_two_bots(
-    client, mock_queue
-) -> None:
-    """Second upload: 3 jobs (self + both directions with existing bot).
-    The logged jobs_enqueued must equal 3 — kills count arithmetic mutants."""
-    upload(client, "Alpha")
-    with capture_logs() as cap:
-        upload(client, "Beta")
-    event = next(e for e in cap if e["event"] == "bot_uploaded")
-    assert event["jobs_enqueued"] == 3
 
 
 # ---------------------------------------------------------------------------
@@ -602,3 +559,308 @@ def test_success_response_sets_samesite_lax_cookie(client, mock_queue) -> None:
     resp = upload(client, "SameSiteBot")
     set_cookie = resp.headers.get("set-cookie", "")
     assert "samesite=lax" in set_cookie.lower()
+
+
+# ---------------------------------------------------------------------------
+# web.runtimes — RUNTIMES allowlist
+# ---------------------------------------------------------------------------
+
+
+def test_runtimes_contains_python_310_through_314() -> None:
+    from web.runtimes import RUNTIMES
+
+    for v in ("3.10", "3.11", "3.12", "3.13", "3.14"):
+        assert f"python-{v}" in RUNTIMES
+
+
+def test_runtime_has_expected_fields() -> None:
+    from web.runtimes import RUNTIMES
+
+    rt = RUNTIMES["python-3.13"]
+    assert rt.image == "pyowa/bot-runner-python:3.13"
+    assert rt.interpreter == "python"
+    assert rt.ext == ".py"
+
+
+def test_default_runtime_key_is_python_314() -> None:
+    from web.runtimes import DEFAULT_RUNTIME_KEY
+
+    assert DEFAULT_RUNTIME_KEY == "python-3.14"
+
+
+def test_default_runtime_key_is_in_runtimes() -> None:
+    from web.runtimes import DEFAULT_RUNTIME_KEY, RUNTIMES
+
+    assert DEFAULT_RUNTIME_KEY in RUNTIMES
+
+
+# ---------------------------------------------------------------------------
+# extract_runtime_key
+# ---------------------------------------------------------------------------
+
+
+def test_extract_runtime_key_language_field() -> None:
+    from web.utils import extract_runtime_key
+
+    source = '"""\nname: MyBot\nlanguage: python-3.13\n"""\nimport sys\n'
+    assert extract_runtime_key(source) == "python-3.13"
+
+
+def test_extract_runtime_key_python_alias() -> None:
+    from web.utils import extract_runtime_key
+
+    source = '"""\nname: MyBot\npython: 3.13\n"""\nimport sys\n'
+    assert extract_runtime_key(source) == "python-3.13"
+
+
+def test_extract_runtime_key_invalid_language_returns_none() -> None:
+    from web.utils import extract_runtime_key
+
+    source = '"""\nname: MyBot\nlanguage: ruby-99\n"""\nimport sys\n'
+    assert extract_runtime_key(source) is None
+
+
+def test_extract_runtime_key_invalid_python_returns_none() -> None:
+    from web.utils import extract_runtime_key
+
+    source = '"""\nname: MyBot\npython: 3.9\n"""\nimport sys\n'
+    assert extract_runtime_key(source) is None
+
+
+def test_extract_runtime_key_no_field_returns_default() -> None:
+    from web.runtimes import DEFAULT_RUNTIME_KEY
+    from web.utils import extract_runtime_key
+
+    source = '"""\nname: MyBot\n"""\nimport sys\n'
+    assert extract_runtime_key(source) == DEFAULT_RUNTIME_KEY
+
+
+def test_extract_runtime_key_language_takes_priority_over_python() -> None:
+    from web.utils import extract_runtime_key
+
+    source = '"""\nname: MyBot\nlanguage: python-3.12\npython: 3.13\n"""\nimport sys\n'
+    assert extract_runtime_key(source) == "python-3.12"
+
+
+def test_extract_runtime_key_syntax_error_returns_none() -> None:
+    from web.utils import extract_runtime_key
+
+    assert extract_runtime_key("def (:\n") is None
+
+
+def test_extract_runtime_key_empty_source_returns_none() -> None:
+    from web.utils import extract_runtime_key
+
+    assert extract_runtime_key("") is None
+
+
+def test_extract_runtime_key_no_space_after_colon() -> None:
+    from web.utils import extract_runtime_key
+
+    source = '"""\nname: MyBot\nlanguage:python-3.13\n"""\nimport sys\n'
+    assert extract_runtime_key(source) == "python-3.13"
+
+
+# ---------------------------------------------------------------------------
+# pick_runtime_key
+# ---------------------------------------------------------------------------
+
+
+def test_pick_runtime_key_higher_python_version_wins() -> None:
+    from messaging.routing import pick_runtime_key
+
+    assert pick_runtime_key("python-3.11", "python-3.13") == "python-3.13"
+    assert pick_runtime_key("python-3.13", "python-3.11") == "python-3.13"
+
+
+def test_pick_runtime_key_equal_versions_returns_first() -> None:
+    from messaging.routing import pick_runtime_key
+
+    assert pick_runtime_key("python-3.13", "python-3.13") == "python-3.13"
+
+
+# ---------------------------------------------------------------------------
+# Upload flow — runtime_key stored on bot DB row
+# ---------------------------------------------------------------------------
+
+
+async def test_upload_with_language_field_stores_runtime_key(client, engine) -> None:
+    source = b'"""\nname: LangBot\nlanguage: python-3.12\n"""\nimport sys\n'
+    client.post("/submit", files={"file": ("bot.py", source, "text/plain")})
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        row = (
+            await session.execute(
+                select(Bot.runtime_key).where(Bot.versioned_name == "LangBot")
+            )
+        ).one()
+    assert row[0] == "python-3.12"
+
+
+async def test_upload_with_python_alias_stores_runtime_key(client, engine) -> None:
+    source = b'"""\nname: AliasBot\npython: 3.12\n"""\nimport sys\n'
+    client.post("/submit", files={"file": ("bot.py", source, "text/plain")})
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        row = (
+            await session.execute(
+                select(Bot.runtime_key).where(Bot.versioned_name == "AliasBot")
+            )
+        ).one()
+    assert row[0] == "python-3.12"
+
+
+def test_upload_with_invalid_language_rejected(client) -> None:
+    source = b'"""\nname: BadRuntime\nlanguage: cobol-85\n"""\nimport sys\n'
+    resp = client.post("/submit", files={"file": ("bot.py", source, "text/plain")})
+    assert "Invalid runtime" in resp.text
+
+
+# ---------------------------------------------------------------------------
+# BuildPodMessage — new web upload behavior (step 6)
+# ---------------------------------------------------------------------------
+
+
+def test_upload_publishes_one_build_pod_message(client, mock_queue) -> None:
+    """Uploading a bot publishes exactly one BuildPodMessage to matches.build."""
+    upload(client, "BuildBot")
+    assert len(mock_queue.build_pod_messages) == 1
+
+
+def test_upload_build_pod_message_has_correct_runtime_key(client, mock_queue) -> None:
+    """The BuildPodMessage runtime_key matches the bot's declared runtime."""
+    from web.runtimes import DEFAULT_RUNTIME_KEY
+
+    upload(client, "RuntimeBuildBot")
+    assert mock_queue.build_pod_messages[0].runtime_key == DEFAULT_RUNTIME_KEY
+
+
+async def test_upload_build_pod_message_has_correct_bot_id(
+    client, engine, mock_queue
+) -> None:
+    """The BuildPodMessage bot_id matches the newly-inserted bot DB row."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    upload(client, "BotIdCheckBot")
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        row = (
+            await session.execute(
+                select(Bot.id).where(Bot.versioned_name == "BotIdCheckBot")
+            )
+        ).one()
+    assert mock_queue.build_pod_messages[0].bot_id == row[0]
+
+
+def test_upload_does_not_enqueue_match_jobs(client, mock_queue) -> None:
+    """Web upload no longer publishes MatchJob messages; only BuildPodMessage."""
+    upload(client, "NoMatchJobBot")
+    assert mock_queue.messages == []
+
+
+# ---------------------------------------------------------------------------
+# enqueue_match_pairs — direct unit tests (coverage + mutant killing)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_enqueue_match_pairs_self_pair_only_for_single_bot() -> None:
+    """With one bot in the DB, enqueue_match_pairs returns 1 (self-pair only)."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from messaging.queue import MatchJob
+    from web.utils import enqueue_match_pairs
+
+    mock_bot = MagicMock()
+    mock_bot.id = 1
+    mock_bot.runtime_key = "python-3.14"
+
+    mock_bots = MagicMock()
+    mock_bots.all = AsyncMock(return_value=[mock_bot])
+
+    recorded: list[MatchJob] = []
+
+    class _Q:
+        async def enqueue_match(self, job: MatchJob) -> None:
+            recorded.append(job)
+
+        async def enqueue_build_pod(self, msg: object) -> None:  # pragma: no cover
+            pass
+
+    count = await enqueue_match_pairs(_Q(), mock_bots, 1, "python-3.14")
+    assert count == 1
+    assert len(recorded) == 1
+    assert recorded[0].bot_x_id == 1
+    assert recorded[0].bot_o_id == 1  # self-pair
+
+
+@pytest.mark.asyncio
+async def test_enqueue_match_pairs_two_bots_returns_three() -> None:
+    """With two bots (new + one existing), returns 3 (self + both directions)."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from messaging.queue import MatchJob
+    from web.utils import enqueue_match_pairs
+
+    mock_existing = MagicMock()
+    mock_existing.id = 1
+    mock_existing.runtime_key = "python-3.14"
+
+    mock_new = MagicMock()
+    mock_new.id = 2
+    mock_new.runtime_key = "python-3.14"
+
+    # all() returns both bots; new_bot_id is 2
+    mock_bots = MagicMock()
+    mock_bots.all = AsyncMock(return_value=[mock_existing, mock_new])
+
+    recorded: list[MatchJob] = []
+
+    class _Q:
+        async def enqueue_match(self, job: MatchJob) -> None:
+            recorded.append(job)
+
+        async def enqueue_build_pod(self, msg: object) -> None:  # pragma: no cover
+            pass
+
+    count = await enqueue_match_pairs(_Q(), mock_bots, 2, "python-3.14")
+    assert count == 3
+    pairs = {(j.bot_x_id, j.bot_o_id) for j in recorded}
+    assert (2, 1) in pairs  # new as X vs existing as O
+    assert (1, 2) in pairs  # existing as X vs new as O
+    assert (2, 2) in pairs  # self-pair for new bot
+
+
+@pytest.mark.asyncio
+async def test_enqueue_match_pairs_both_directions_enqueued() -> None:
+    """Cross-pair must be enqueued in BOTH directions (X vs O and O vs X)."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from messaging.queue import MatchJob
+    from web.utils import enqueue_match_pairs
+
+    mock_a = MagicMock()
+    mock_a.id = 10
+    mock_a.runtime_key = "python-3.13"
+
+    mock_b = MagicMock()
+    mock_b.id = 20
+    mock_b.runtime_key = "python-3.13"
+
+    mock_bots = MagicMock()
+    mock_bots.all = AsyncMock(return_value=[mock_a, mock_b])
+
+    recorded: list[MatchJob] = []
+
+    class _Q:
+        async def enqueue_match(self, job: MatchJob) -> None:
+            recorded.append(job)
+
+        async def enqueue_build_pod(self, msg: object) -> None:  # pragma: no cover
+            pass
+
+    await enqueue_match_pairs(_Q(), mock_bots, 20, "python-3.13")
+    pairs = {(j.bot_x_id, j.bot_o_id) for j in recorded}
+    # both directions must be present
+    assert (20, 10) in pairs
+    assert (10, 20) in pairs

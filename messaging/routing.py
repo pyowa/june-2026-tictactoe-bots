@@ -1,3 +1,24 @@
+def pick_runtime_key(a: str, b: str) -> str:
+    """Pick the 'higher' of two runtime keys.
+
+    For Python runtimes (python-X.Y vs python-X.Y), picks the higher version.
+    When runtimes differ in language family, prefers `a` (the new bot's key).
+    """
+
+    def python_tuple(key: str) -> tuple[int, ...]:
+        if key.startswith("python-"):
+            try:
+                return tuple(int(x) for x in key[len("python-"):].split("."))
+            except ValueError:
+                return ()
+        return ()
+
+    ta, tb = python_tuple(a), python_tuple(b)
+    if ta and tb:
+        return a if ta >= tb else b
+    return a
+
+
 def pick_python_version(a: str, b: str) -> str:
     """Pick the higher of two Python version strings (e.g. '3.11', '3.12').
 

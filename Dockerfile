@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
-# Single Dockerfile with three build targets (web, orchestrator, worker).
-# All three share the `base` stage which installs the full project
+# Single Dockerfile with build targets: web, dispatcher, worker, test-runner.
+# All share the `base` stage which installs the full project
 # dependencies via uv. Source code is bind-mounted at runtime from compose
 # for dev convenience, so the image does not COPY the project source.
 #
@@ -44,16 +44,33 @@ EXPOSE 8000
 CMD ["uvicorn", "web.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
 # ---------------------------------------------------------------------------
-# orchestrator: consumes matches.todo, drives the per-turn RPC loop.
-# ---------------------------------------------------------------------------
-FROM base AS orchestrator
-CMD ["python", "-m", "runner.orchestrator"]
-
-# ---------------------------------------------------------------------------
-# worker: consumes turn.pyX.Y.requests, runs the bot subprocess.
+# worker: consumes turn.requests, runs the bot subprocess.
 # ---------------------------------------------------------------------------
 FROM base AS worker
 CMD ["python", "-m", "runner.turn_worker"]
+
+# ---------------------------------------------------------------------------
+# dispatcher: runs inside the kind/AKS cluster; consumes turn.requests and
+# creates per-turn Kubernetes Jobs. Needs the kubernetes client (dispatcher
+# dependency group) plus its source dependencies baked in (no bind mount).
+# ---------------------------------------------------------------------------
+FROM base AS dispatcher
+RUN uv sync --frozen --no-dev --group dispatcher --no-install-project
+# Bake in the source modules the dispatcher depends on (no compose bind mount).
+COPY dispatcher/ ./dispatcher/
+COPY messaging/ ./messaging/
+COPY db/ ./db/
+COPY entities/ ./entities/
+COPY runner/__init__.py ./runner/__init__.py
+COPY runner/engine.py ./runner/engine.py
+COPY web/__init__.py ./web/__init__.py
+COPY web/runtimes.py ./web/runtimes.py
+CMD ["python", "-m", "dispatcher.main"]
+
+# ---------------------------------------------------------------------------
+# match-scheduler: consumes matches.schedule, publishes MatchOndeck to matches.ondeck.
+FROM base AS match-scheduler
+CMD ["python", "-m", "match_scheduler.main"]
 
 # ---------------------------------------------------------------------------
 # test-runner: like base but with dev deps (pytest, mutmut, etc.). Used by

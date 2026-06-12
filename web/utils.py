@@ -14,20 +14,14 @@ from typing import Any
 
 from entities.bot.repository import BotRepository
 from messaging.queue import MatchJob, Queue
-from messaging.routing import pick_python_version
+from messaging.routing import pick_runtime_key
+from web.runtimes import DEFAULT_RUNTIME_KEY, RUNTIMES
 
-# Python versions we accept on upload. The fleet of turn workers is sized
-# to this set — adding a new version means adding a worker for it. When the
-# `python:` field is omitted from a bot's docstring, the latest version
-# in this tuple is used.
-SUPPORTED_PYTHON_VERSIONS: tuple[str, ...] = (
-    "3.10",
-    "3.11",
-    "3.12",
-    "3.13",
-    "3.14",
+# Derived from RUNTIMES so the two stay in sync automatically.
+SUPPORTED_PYTHON_VERSIONS: tuple[str, ...] = tuple(
+    key[len("python-"):] for key in RUNTIMES if key.startswith("python-")
 )
-DEFAULT_PYTHON_VERSION = SUPPORTED_PYTHON_VERSIONS[-1]
+DEFAULT_PYTHON_VERSION: str = DEFAULT_RUNTIME_KEY[len("python-"):]
 
 
 def extract_bot_name(source: str) -> str | None:
@@ -56,7 +50,13 @@ def extract_bot_name(source: str) -> str | None:
     return None
 
 
-def extract_python_version(source: str) -> str | None:
+def extract_runtime_key(source: str) -> str | None:
+    """Extract the runtime key from a bot docstring.
+
+    Accepts `language: python-3.13` (primary) or `python: 3.13` (legacy alias
+    that maps to `python-3.13`). Returns None if an unrecognised key is given,
+    or DEFAULT_RUNTIME_KEY when neither field is present.
+    """
     try:
         tree = ast.parse(source)
     except SyntaxError:
@@ -73,15 +73,33 @@ def extract_python_version(source: str) -> str | None:
     if not isinstance(docstring, str):
         return None
 
+    language_key: str | None = None
+    python_ver: str | None = None
+
     for line in docstring.splitlines():
         stripped = line.strip()
-        if stripped.lower().startswith("python:"):
-            version = stripped[7:].strip()
-            if version in SUPPORTED_PYTHON_VERSIONS:
-                return version
-            return None  # present but not supported
+        if stripped.lower().startswith("language:"):
+            language_key = stripped[9:].strip()
+        elif stripped.lower().startswith("python:"):
+            python_ver = stripped[7:].strip()
 
-    return DEFAULT_PYTHON_VERSION
+    if language_key is not None:
+        return language_key if language_key in RUNTIMES else None
+
+    if python_ver is not None:
+        mapped = f"python-{python_ver}"
+        return mapped if mapped in RUNTIMES else None
+
+    return DEFAULT_RUNTIME_KEY
+
+
+def extract_python_version(source: str) -> str | None:
+    """Legacy wrapper — returns the Python version string (e.g. '3.13') for
+    Python runtimes, or None if the runtime key is invalid/non-Python."""
+    key = extract_runtime_key(source)
+    if key is None:
+        return None
+    return key[len("python-"):] if key.startswith("python-") else None
 
 
 def versioned_name(base_name: str, version: int) -> str:
@@ -122,25 +140,32 @@ def group_matches_by_version(
     return grouped
 
 
+def _python_version_from_runtime_key(key: str) -> str:
+    """'python-3.13' → '3.13'. Non-Python runtimes return the full key."""
+    return key[len("python-"):] if key.startswith("python-") else key
+
+
 async def enqueue_match_pairs(
     queue: Queue,
     bots: BotRepository,
     new_bot_id: int,
-    new_python_version: str,
+    new_runtime_key: str,
 ) -> int:
     """Enqueue one MatchJob per unplayed pair involving the newly inserted
-    bot. Includes the self-pair (`new` vs `new`). The chosen Python version
-    is `max(new, other)` so older bots run on newer interpreters.
-    Returns the number of jobs enqueued."""
+    bot. Includes the self-pair (`new` vs `new`). The chosen runtime is the
+    higher of the two bots' declared runtimes so older bots run on newer
+    interpreters. Returns the number of jobs enqueued."""
     all_bots = await bots.all()
     count = 0
     for other in all_bots:
-        py = pick_python_version(new_python_version, other.python_version)
+        rk = pick_runtime_key(new_runtime_key, other.runtime_key)
+        py = _python_version_from_runtime_key(rk)
         await queue.enqueue_match(
             MatchJob(
                 bot_x_id=new_bot_id,
                 bot_o_id=other.id,
                 python_version=py,
+                runtime_key=rk,
                 correlation_id=secrets.token_hex(16),
             )
         )
@@ -151,6 +176,7 @@ async def enqueue_match_pairs(
                     bot_x_id=other.id,
                     bot_o_id=new_bot_id,
                     python_version=py,
+                    runtime_key=rk,
                     correlation_id=secrets.token_hex(16),
                 )
             )

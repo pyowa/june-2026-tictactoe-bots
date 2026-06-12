@@ -14,13 +14,14 @@ from fastapi import Request, UploadFile
 from fastapi.responses import HTMLResponse
 
 from entities.bot.repository import BotRepository
+from messaging.contracts import BuildPodMessage
 from messaging.queue import Queue
 from web.templates import render_index_response, templates
 from web.utils import (
+    _python_version_from_runtime_key,
     encode_cookie,
-    enqueue_match_pairs,
     extract_bot_name,
-    extract_python_version,
+    extract_runtime_key,
     parse_cookie,
     versioned_name,
 )
@@ -46,8 +47,8 @@ class _SubmissionError(Exception):
 def _validate_source(source_bytes: bytes) -> tuple[str, str]:
     """Decode + validate the uploaded source.
 
-    Returns `(bot_name, python_version)`. Raises `_SubmissionError` if the
-    docstring is missing the `name:` field or the declared `python:` is
+    Returns `(bot_name, runtime_key)`. Raises `_SubmissionError` if the
+    docstring is missing the `name:` field or the declared runtime is
     unsupported."""
     source = source_bytes.decode("utf-8", errors="replace")  # pragma: no mutate
 
@@ -63,14 +64,14 @@ def _validate_source(source_bytes: bytes) -> tuple[str, str]:
             "reserved for auto-versioning. Pick a different name."
         )
 
-    python_version = extract_python_version(source)
-    if python_version is None:
+    runtime_key = extract_runtime_key(source)
+    if runtime_key is None:
         raise _SubmissionError(
-            "Invalid 'python:' value in docstring. "
-            "Use a version like '3', '3.11', or '3.12'."
+            "Invalid runtime in docstring. Use 'language: python-3.13' "
+            "or 'python: 3.13'."
         )
 
-    return bot_name, python_version
+    return bot_name, runtime_key
 
 
 async def _resolve_owner_token(
@@ -92,10 +93,11 @@ async def _persist_bot(
     bots: BotRepository,
     bot_name: str,
     owner_token: str,
-    python_version: str,
+    runtime_key: str,
     source_bytes: bytes,
 ) -> tuple[str, int]:
     """Insert the new bot row and return `(versioned_name, bot_id)`."""
+    python_version = _python_version_from_runtime_key(runtime_key)
     version = await bots.next_version(bot_name)
     name = versioned_name(bot_name, version)
     bot = await bots.create(
@@ -104,6 +106,7 @@ async def _persist_bot(
         version=version,
         owner_token=owner_token,
         python_version=python_version,
+        runtime_key=runtime_key,
         source=source_bytes,
     )
     return name, bot.id
@@ -146,21 +149,22 @@ async def handle_submission(
     a success or error page."""
     source_bytes = await file.read()
     try:
-        bot_name, python_version = _validate_source(source_bytes)
+        bot_name, runtime_key = _validate_source(source_bytes)
+        python_version = _python_version_from_runtime_key(runtime_key)
         owned = parse_cookie(owned_bots_cookie)
         owner_token = await _resolve_owner_token(bots, bot_name, owned)
         name, new_bot_id = await _persist_bot(
-            bots, bot_name, owner_token, python_version, source_bytes
+            bots, bot_name, owner_token, runtime_key, source_bytes
         )
-        jobs_enqueued = await enqueue_match_pairs(
-            queue, bots, new_bot_id, python_version
+        await queue.enqueue_build_pod(
+            BuildPodMessage(bot_id=new_bot_id, runtime_key=runtime_key)
         )
         _log.info(
             "bot_uploaded",
             bot_name=bot_name,
             bot_id=new_bot_id,
             python_version=python_version,
-            jobs_enqueued=jobs_enqueued,
+            runtime_key=runtime_key,
         )
         listing = await bots.list_for_homepage()
     except _SubmissionError as exc:

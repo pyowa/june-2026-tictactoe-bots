@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
 Register every bot under example_bots/ as a v1 bot in the database (source
-bytes stored on the row), then enqueue every bot pair to `matches.todo` so
-the orchestrator has work to do. Clears existing bots/matches/moves first.
+bytes stored on the row), then publish one BuildPodMessage per bot to
+`matches.build` so pod_builder can create pods and match_scheduler can
+schedule matches. Clears existing bots/matches/moves first.
 
 Run with: uv run poe seed-examples  (or `python -m scripts.seed_example_bots`)
 """
@@ -19,33 +20,16 @@ from entities.bot.repository import BotRepository
 from entities.match.model import Match
 from entities.move.model import Move
 from messaging.client import make_queue
-from messaging.queue import MatchJob, Queue
-from messaging.routing import pick_python_version
-from web.utils import extract_bot_name, extract_python_version, versioned_name
+from messaging.contracts import BuildPodMessage
+from web.utils import (
+    _python_version_from_runtime_key,
+    extract_bot_name,
+    extract_runtime_key,
+    versioned_name,
+)
 
 ROOT = Path(__file__).parent.parent
 EXAMPLE_BOTS_DIR = ROOT / "example_bots"
-
-
-async def enqueue_all_pairs(bots: BotRepository, queue: Queue) -> int:
-    """Enqueue one MatchJob per ordered pair (including self-pairs) so the
-    orchestrator gets the full Cartesian product to work through."""
-    all_bots = await bots.all()
-
-    count = 0
-    for x in all_bots:
-        for o in all_bots:
-            py = pick_python_version(x.python_version, o.python_version)
-            await queue.enqueue_match(
-                MatchJob(
-                    bot_x_id=x.id,
-                    bot_o_id=o.id,
-                    python_version=py,
-                    correlation_id=secrets.token_hex(16),
-                )
-            )
-            count += 1
-    return count
 
 
 async def main() -> None:
@@ -72,7 +56,10 @@ async def main() -> None:
                 print(f"  Skipping {src.name}: no 'name:' field in docstring")
                 continue
 
-            python_version = extract_python_version(source_text) or "3"
+            from web.runtimes import DEFAULT_RUNTIME_KEY
+
+            rk = extract_runtime_key(source_text) or DEFAULT_RUNTIME_KEY
+            python_version = _python_version_from_runtime_key(rk)
 
             # Multiple files can share a `name:` (e.g. perfect_bot_v1.py and
             # perfect_bot_v2.py both say "Perfect Bot"). Auto-version them
@@ -86,6 +73,7 @@ async def main() -> None:
                 version=version,
                 owner_token=secrets.token_hex(32),
                 python_version=python_version,
+                runtime_key=rk,
                 source=source_bytes,
             )
             inserted += 1
@@ -93,11 +81,17 @@ async def main() -> None:
 
     queue = make_queue()
     async with get_session() as session:
-        queued = await enqueue_all_pairs(BotRepository(session), queue)
-    print(f"\nInserted {inserted} bots, enqueued {queued} match jobs to matches.todo.")
+        all_bots = await BotRepository(session).all()
+
+    count = 0
+    for bot in all_bots:
+        await queue.enqueue_build_pod(
+            BuildPodMessage(bot_id=bot.id, runtime_key=bot.runtime_key)
+        )
+        count += 1
+
     print(
-        "Run `docker compose up -d` to start the orchestrator + workers "
-        "and play them out."
+        f"\nInserted {inserted} bots, enqueued {count} build-pod jobs to matches.build."
     )
 
 

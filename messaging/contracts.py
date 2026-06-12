@@ -1,34 +1,44 @@
 """
-Stable contract for the per-turn RPC.
+Stable contracts for the pod-per-bot pipeline.
 
-Both the current docker worker fleet (`runner/turn_worker.py`) and the
-future k8s dispatcher will honor this shape, so the acceptance tests in
-`tests/acceptance/` survive the implementation swap unchanged.
-
-The AMQP message properties carry `correlation_id` (matches reply to
-request) and `reply_to` (caller's exclusive reply queue). The JSON
-payload does not duplicate those.
+Web publishes BuildPodMessage to BUILD_POD_QUEUE; pod_builder creates a pod and
+publishes PodReadyMessage to POD_READY_QUEUE; match_scheduler schedules pairings
+and publishes MatchOndeck to MATCH_ONDECK_QUEUE; ondeck_handler runs each match.
 """
-
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-TURN_REQUEST_QUEUE = "turn.requests"
+# ---------------------------------------------------------------------------
+# Queue name constants
+# ---------------------------------------------------------------------------
+
+BUILD_POD_QUEUE = "matches.build"
+POD_READY_QUEUE = "matches.schedule"
+MATCH_ONDECK_QUEUE = "matches.ondeck"
 
 
-class TurnRequest(BaseModel):
+class BuildPodMessage(BaseModel):
+    """Sent by web when a bot is uploaded; tells pod_builder to create a pod."""
+
     model_config = ConfigDict(frozen=True)
 
-    symbol: Literal["X", "O"]
-    board: str  # 3 rows, "|"-delimited cells, "\n"-separated; "." = empty
-    source_b64: str
-    runtime_key: str  # key into the RUNTIMES allowlist, e.g. "python-3.13"
+    bot_id: int
+    runtime_key: str
 
 
-class TurnReply(BaseModel):
+class PodReadyMessage(BaseModel):
+    """Sent by pod_builder when a pod is ready; triggers match scheduling."""
+
     model_config = ConfigDict(frozen=True)
 
-    # Exactly one of `board` / `error` is non-None per reply.
-    board: str | None = None
-    error: str | None = None
+    bot_id: int
+
+
+class MatchOndeck(BaseModel):
+    """Sent by match_scheduler for each pairing; tells match_runner to run a match."""
+
+    model_config = ConfigDict(frozen=True)
+
+    bot_x_id: int
+    bot_o_id: int
+    correlation_id: str
