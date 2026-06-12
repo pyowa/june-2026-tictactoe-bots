@@ -5,20 +5,17 @@ existing (permanent) bot pods, and writes the result directly to Postgres.
 
 import asyncio
 import functools
-import os
 from typing import Any
 
+import aio_pika
 import structlog
 
 from db.session import get_session
 from dispatcher.match_runner import run_match_from_pods
 from entities.bot.repository import BotRepository
 from entities.match.repository import MatchRepository
+from messaging.client import BROKER_URL
 from messaging.contracts import MATCH_ONDECK_QUEUE, MatchOndeck
-
-RABBITMQ_URL = os.environ.get(
-    "RABBITMQ_URL", "amqp://guest:guest@host.docker.internal:5672/"
-)
 
 _log = structlog.get_logger()
 
@@ -58,8 +55,7 @@ async def handle_match_ondeck(
             )
             return
 
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(
+        result = await asyncio.get_running_loop().run_in_executor(
             None,
             functools.partial(
                 run_match_from_pods,
@@ -82,7 +78,6 @@ async def handle_match_ondeck(
 
 
 async def run() -> None:  # pragma: no cover
-    import aio_pika
     from kubernetes import client, config
 
     from messaging.log import configure_logging
@@ -95,7 +90,7 @@ async def run() -> None:  # pragma: no cover
 
     core_v1 = client.CoreV1Api()
 
-    connection = await aio_pika.connect_robust(RABBITMQ_URL)
+    connection = await aio_pika.connect_robust(BROKER_URL)
     channel = await connection.channel()
     queue = await channel.declare_queue(MATCH_ONDECK_QUEUE, durable=True)
 

@@ -52,7 +52,10 @@ When your change touches any of the below, update the docs **in the same change*
 
 ## Things you must not do without explicit user approval
 
-- **Any git command that modifies state.** This includes `add`, `rm`, `commit`, `amend`, `restore`, `reset`, `checkout`, `branch`, `switch`, `stash`, `tag`, `push`, `pull`, `fetch`, `merge`, `rebase`, `cherry-pick`. The user owns all git operations end-to-end; you only ever change files on disk. Read-only inspection (`git log`, `git diff`, `git status`, `git show`, `git blame`) is fine and encouraged when you need to understand context.
+- **Git operations on `main`.** Never `push`, `merge`, `rebase`, `reset`, `cherry-pick`, or force-anything onto `main`. `main` is the user's branch — treat it as read-only.
+- **Committing on feature branches is allowed**, but only when the user has explicitly asked for a commit or has given standing permission for the current task (e.g. "commit as you go on this branch"). Always confirm the current branch with `git branch --show-current` before committing. Never commit on `main`. Never amend a commit the user didn't ask you to amend. Never `push` unless explicitly asked.
+- **Destructive or hard-to-reverse git operations** (`reset --hard`, `restore`, `checkout -- .`, `clean -f`, `branch -D`, `stash drop`) require explicit user approval regardless of branch.
+- Read-only inspection (`git log`, `git diff`, `git status`, `git show`, `git blame`) is fine and encouraged when you need to understand context.
 - Drop database tables, run `poe reset-db`, or `docker compose down -v` outside of an explicitly-scoped task.
 - Add a new top-level dependency without a real need. If you do need one, add it to `pyproject.toml` and run `uv sync`, and explain why in your response.
 - Introduce a new technology (queueing system, ORM, test framework, web framework) when an existing one in this project would do.

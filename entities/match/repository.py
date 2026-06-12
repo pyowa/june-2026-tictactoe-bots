@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from entities.bot.model import Bot
 from entities.match.model import Match
@@ -16,27 +17,27 @@ from runner.engine import MatchResult
 
 
 def _match_select() -> Any:
-    bx = Bot.__table__.alias("bx")  # pragma: no mutate -- cosmetic SQL alias
-    bo = Bot.__table__.alias("bo")  # pragma: no mutate
-    bw = Bot.__table__.alias("bw")  # pragma: no mutate
+    bx = aliased(Bot, name="bx")
+    bo = aliased(Bot, name="bo")
+    bw = aliased(Bot, name="bw")
     return (
         (
             select(
                 Match.id,
-                bx.c.versioned_name.label("bot_x"),
-                bx.c.base_name.label("bot_x_base"),
-                bx.c.python_version.label("bot_x_python"),
-                bo.c.versioned_name.label("bot_o"),
-                bo.c.base_name.label("bot_o_base"),
-                bo.c.python_version.label("bot_o_python"),
-                bw.c.versioned_name.label("winner"),
+                bx.versioned_name.label("bot_x"),
+                bx.base_name.label("bot_x_base"),
+                bx.python_version.label("bot_x_python"),
+                bo.versioned_name.label("bot_o"),
+                bo.base_name.label("bot_o_base"),
+                bo.python_version.label("bot_o_python"),
+                bw.versioned_name.label("winner"),
                 Match.result,
                 Match.played_at,
             )
             .select_from(Match)
-            .join(bx, Match.bot_x_id == bx.c.id)
-            .join(bo, Match.bot_o_id == bo.c.id)
-            .outerjoin(bw, Match.winner_id == bw.c.id)
+            .join(bx, Match.bot_x_id == bx.id)
+            .join(bo, Match.bot_o_id == bo.id)
+            .outerjoin(bw, Match.winner_id == bw.id)
         ),
         bx,
         bo,
@@ -59,7 +60,7 @@ class MatchRepository:
         stmt = stmt.where(Match.id == match_id)
         if bot_base_name is not None:
             stmt = stmt.where(
-                or_(bx.c.base_name == bot_base_name, bo.c.base_name == bot_base_name)
+                or_(bx.base_name == bot_base_name, bo.base_name == bot_base_name)
             )
         result = await self._session.execute(stmt)
         return result.first()
@@ -74,7 +75,7 @@ class MatchRepository:
         """List every match involving any version of the given bot family."""
         stmt, bx, bo = _match_select()
         stmt = stmt.where(
-            or_(bx.c.base_name == base_name, bo.c.base_name == base_name)
+            or_(bx.base_name == base_name, bo.base_name == base_name)
         ).order_by(Match.played_at.desc())
         result = await self._session.execute(stmt)
         return list(result.all())

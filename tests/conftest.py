@@ -2,7 +2,9 @@ import os
 from collections.abc import AsyncIterator, Iterator
 from datetime import datetime
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
+import aio_pika
 import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
@@ -20,8 +22,18 @@ from entities.bot.model import Bot
 from entities.match.model import Match
 from entities.move.model import Move
 from messaging.contracts import BuildPodMessage
-from messaging.queue import MatchJob
 from web.dependencies import get_queue
+
+
+def make_amqp_message(body: bytes) -> MagicMock:
+    """Create a mock aio_pika.IncomingMessage with process() wired up."""
+    msg = MagicMock(spec=aio_pika.IncomingMessage)
+    msg.body = body
+    msg.process = MagicMock(return_value=AsyncMock().__aenter__.return_value)
+    msg.ack = AsyncMock()
+    msg.process.return_value.__aenter__ = AsyncMock(return_value=None)
+    msg.process.return_value.__aexit__ = AsyncMock(return_value=None)
+    return msg
 
 BOT_TEMPLATE = '"""\nname: {name}\n"""\nimport sys\n'
 
@@ -119,11 +131,7 @@ class _RecordingQueue:
     """Captures published messages so tests can assert without a real broker."""
 
     def __init__(self) -> None:
-        self.messages: list[MatchJob] = []
         self.build_pod_messages: list[BuildPodMessage] = []
-
-    async def enqueue_match(self, job: MatchJob) -> None:
-        self.messages.append(job)
 
     async def enqueue_build_pod(self, msg: BuildPodMessage) -> None:
         self.build_pod_messages.append(msg)

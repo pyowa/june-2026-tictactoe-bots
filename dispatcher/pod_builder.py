@@ -21,6 +21,7 @@ from dispatcher.pods import (
     wait_for_pod_ready,
 )
 from entities.bot.repository import BotRepository
+from messaging.client import BROKER_URL
 from messaging.contracts import (
     BUILD_POD_QUEUE,
     POD_READY_QUEUE,
@@ -29,12 +30,25 @@ from messaging.contracts import (
 )
 from web.runtimes import RUNTIMES
 
-RABBITMQ_URL = os.environ.get(
-    "RABBITMQ_URL", "amqp://guest:guest@host.docker.internal:5672/"
-)
 POD_TIMEOUT = float(os.environ.get("POD_TIMEOUT", "60"))
 
 _log = structlog.get_logger()
+
+
+def _build_pod_and_wait(
+    core_v1: Any,
+    pod_name: str,
+    image: str,
+    source_b64: str,
+    bot_id: int,
+    *,
+    timeout: float,
+) -> None:
+    manifest = build_bot_pod_manifest(pod_name, image, source_b64, bot_id)
+    core_v1.create_namespaced_pod("bots", body=manifest)
+    wait_for_pod_ready(core_v1, pod_name, timeout=timeout)
+    pod_ip = get_pod_ip(core_v1, pod_name)
+    wait_for_http_ready(pod_ip, timeout=timeout)
 
 
 async def handle_build_pod_message(
@@ -68,18 +82,18 @@ async def handle_build_pod_message(
 
         _log.info("pod_building", bot_id=msg.bot_id, pod_name=pod_name)
 
-        loop = asyncio.get_running_loop()
-
-        def _build_and_wait() -> None:
-            manifest = build_bot_pod_manifest(
-                pod_name, runtime.image, source_b64, msg.bot_id
-            )
-            core_v1.create_namespaced_pod("bots", body=manifest)
-            wait_for_pod_ready(core_v1, pod_name, timeout=POD_TIMEOUT)
-            pod_ip = get_pod_ip(core_v1, pod_name)
-            wait_for_http_ready(pod_ip, timeout=POD_TIMEOUT)
-
-        await loop.run_in_executor(None, functools.partial(_build_and_wait))
+        await asyncio.get_running_loop().run_in_executor(
+            None,
+            functools.partial(
+                _build_pod_and_wait,
+                core_v1,
+                pod_name,
+                runtime.image,
+                source_b64,
+                msg.bot_id,
+                timeout=POD_TIMEOUT,
+            ),
+        )
 
         async with get_session() as session:
             bots = BotRepository(session)
@@ -88,6 +102,8 @@ async def handle_build_pod_message(
         await channel.default_exchange.publish(
             aio_pika.Message(
                 body=PodReadyMessage(bot_id=msg.bot_id).model_dump_json().encode(),
+                delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+                content_type="application/json",
             ),
             routing_key=POD_READY_QUEUE,
         )
@@ -108,7 +124,7 @@ async def run() -> None:  # pragma: no cover
 
     core_v1 = client.CoreV1Api()
 
-    connection = await aio_pika.connect_robust(RABBITMQ_URL)
+    connection = await aio_pika.connect_robust(BROKER_URL)
     channel = await connection.channel()
     queue = await channel.declare_queue(BUILD_POD_QUEUE, durable=True)
 

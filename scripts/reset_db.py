@@ -10,6 +10,7 @@ Run with: uv run poe reset-db  (or `python -m scripts.reset_db`)
 import asyncio
 import base64
 import json
+import os
 import subprocess
 import urllib.error
 import urllib.parse
@@ -27,9 +28,9 @@ import entities.match.model  # noqa: F401
 import entities.move.model  # noqa: F401
 from db.base import Base
 
-RABBITMQ_MGMT_URL = "http://localhost:15672"
-RABBITMQ_USER = "guest"
-RABBITMQ_PASS = "guest"
+RABBITMQ_MGMT_URL = os.environ.get("RABBITMQ_MGMT_URL", "http://localhost:15672")
+RABBITMQ_USER = os.environ.get("RABBITMQ_USER", "guest")
+RABBITMQ_PASS = os.environ.get("RABBITMQ_PASS", "guest")
 
 
 def purge_rabbitmq_queues() -> None:

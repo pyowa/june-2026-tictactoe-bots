@@ -8,13 +8,9 @@ caller (no global FastAPI state).
 
 import ast
 import json
-import secrets
 import urllib.parse
 from typing import Any
 
-from entities.bot.repository import BotRepository
-from messaging.queue import MatchJob, Queue
-from messaging.routing import pick_runtime_key
 from web.runtimes import DEFAULT_RUNTIME_KEY, RUNTIMES
 
 # Derived from RUNTIMES so the two stay in sync automatically.
@@ -143,42 +139,3 @@ def group_matches_by_version(
 def _python_version_from_runtime_key(key: str) -> str:
     """'python-3.13' → '3.13'. Non-Python runtimes return the full key."""
     return key[len("python-"):] if key.startswith("python-") else key
-
-
-async def enqueue_match_pairs(
-    queue: Queue,
-    bots: BotRepository,
-    new_bot_id: int,
-    new_runtime_key: str,
-) -> int:
-    """Enqueue one MatchJob per unplayed pair involving the newly inserted
-    bot. Includes the self-pair (`new` vs `new`). The chosen runtime is the
-    higher of the two bots' declared runtimes so older bots run on newer
-    interpreters. Returns the number of jobs enqueued."""
-    all_bots = await bots.all()
-    count = 0
-    for other in all_bots:
-        rk = pick_runtime_key(new_runtime_key, other.runtime_key)
-        py = _python_version_from_runtime_key(rk)
-        await queue.enqueue_match(
-            MatchJob(
-                bot_x_id=new_bot_id,
-                bot_o_id=other.id,
-                python_version=py,
-                runtime_key=rk,
-                correlation_id=secrets.token_hex(16),
-            )
-        )
-        count += 1
-        if other.id != new_bot_id:
-            await queue.enqueue_match(
-                MatchJob(
-                    bot_x_id=other.id,
-                    bot_o_id=new_bot_id,
-                    python_version=py,
-                    runtime_key=rk,
-                    correlation_id=secrets.token_hex(16),
-                )
-            )
-            count += 1
-    return count

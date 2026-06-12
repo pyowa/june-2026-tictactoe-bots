@@ -5,7 +5,6 @@ match_runner can proceed.
 """
 
 import asyncio
-import os
 import secrets
 from typing import Any
 
@@ -15,15 +14,12 @@ import structlog
 import entities.move.model  # noqa: F401 — registers Move with SQLAlchemy mapper
 from db.session import get_session
 from entities.bot.repository import BotRepository
+from messaging.client import BROKER_URL
 from messaging.contracts import (
     MATCH_ONDECK_QUEUE,
     POD_READY_QUEUE,
     MatchOndeck,
     PodReadyMessage,
-)
-
-RABBITMQ_URL = os.environ.get(
-    "RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"
 )
 
 _log = structlog.get_logger()
@@ -52,6 +48,8 @@ async def handle_pod_ready_message(message: Any, channel: Any) -> None:
                     )
                     .model_dump_json()
                     .encode(),
+                    delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+                    content_type="application/json",
                 ),
                 routing_key=MATCH_ONDECK_QUEUE,
             )
@@ -66,6 +64,8 @@ async def handle_pod_ready_message(message: Any, channel: Any) -> None:
                         )
                         .model_dump_json()
                         .encode(),
+                        delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+                        content_type="application/json",
                     ),
                     routing_key=MATCH_ONDECK_QUEUE,
                 )
@@ -79,7 +79,7 @@ async def run() -> None:  # pragma: no cover
 
     configure_logging()
 
-    connection = await aio_pika.connect_robust(RABBITMQ_URL)
+    connection = await aio_pika.connect_robust(BROKER_URL)
     channel = await connection.channel()
     queue = await channel.declare_queue(POD_READY_QUEUE, durable=True)
 

@@ -15,7 +15,6 @@ TURN_PORT = 8080
 _POLL_INTERVAL = 0.5
 
 
-
 def build_bot_pod_manifest(
     pod_name: str,
     image: str,

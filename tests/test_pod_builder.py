@@ -2,24 +2,13 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import aio_pika
-
 from dispatcher.pod_builder import handle_build_pod_message
 from messaging.contracts import BuildPodMessage, PodReadyMessage
+from tests.conftest import make_amqp_message
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _make_message(body: bytes) -> MagicMock:
-    msg = MagicMock(spec=aio_pika.IncomingMessage)
-    msg.body = body
-    msg.process = MagicMock(return_value=AsyncMock().__aenter__.return_value)
-    msg.ack = AsyncMock()
-    msg.process.return_value.__aenter__ = AsyncMock(return_value=None)
-    msg.process.return_value.__aexit__ = AsyncMock(return_value=None)
-    return msg
 
 
 def _make_bot_mock(bot_id: int, source: bytes = b"# bot") -> MagicMock:
@@ -38,7 +27,7 @@ async def test_handle_build_pod_message_happy_path_publishes_pod_ready() -> None
     bot = _make_bot_mock(7, source=b"# my bot")
     msg_body = BuildPodMessage(bot_id=7, runtime_key="python-3.14")
 
-    message = _make_message(msg_body.model_dump_json().encode())
+    message = make_amqp_message(msg_body.model_dump_json().encode())
     channel = MagicMock()
     channel.default_exchange.publish = AsyncMock()
     core_v1 = MagicMock()
@@ -59,6 +48,7 @@ async def test_handle_build_pod_message_happy_path_publishes_pod_ready() -> None
         patch("dispatcher.pod_builder.get_session", return_value=session_ctx),
         patch("dispatcher.pod_builder.BotRepository", return_value=bot_repo_instance),
         patch("dispatcher.pod_builder.build_bot_pod_manifest", return_value={}),
+        patch("dispatcher.pod_builder.wait_for_pod_ready"),
         patch("dispatcher.pod_builder.get_pod_ip", return_value="10.0.0.7"),
         patch("dispatcher.pod_builder.wait_for_http_ready"),
         patch("asyncio.get_running_loop") as mock_loop,
@@ -80,7 +70,7 @@ async def test_handle_build_pod_message_happy_path_updates_db() -> None:
     bot = _make_bot_mock(7, source=b"# my bot")
     msg_body = BuildPodMessage(bot_id=7, runtime_key="python-3.14")
 
-    message = _make_message(msg_body.model_dump_json().encode())
+    message = make_amqp_message(msg_body.model_dump_json().encode())
     channel = MagicMock()
     channel.default_exchange.publish = AsyncMock()
     core_v1 = MagicMock()
@@ -98,6 +88,7 @@ async def test_handle_build_pod_message_happy_path_updates_db() -> None:
         patch("dispatcher.pod_builder.get_session", return_value=session_ctx),
         patch("dispatcher.pod_builder.BotRepository", return_value=bot_repo_instance),
         patch("dispatcher.pod_builder.build_bot_pod_manifest", return_value={}),
+        patch("dispatcher.pod_builder.wait_for_pod_ready"),
         patch("dispatcher.pod_builder.get_pod_ip", return_value="10.0.0.7"),
         patch("dispatcher.pod_builder.wait_for_http_ready"),
         patch("asyncio.get_running_loop") as mock_loop,
@@ -121,7 +112,7 @@ async def test_handle_build_pod_message_waits_for_pod_before_getting_ip() -> Non
     bot = _make_bot_mock(7, source=b"# my bot")
     msg_body = BuildPodMessage(bot_id=7, runtime_key="python-3.14")
 
-    message = _make_message(msg_body.model_dump_json().encode())
+    message = make_amqp_message(msg_body.model_dump_json().encode())
     channel = MagicMock()
     channel.default_exchange.publish = AsyncMock()
     core_v1 = MagicMock()
@@ -179,7 +170,7 @@ async def test_handle_build_pod_message_waits_for_pod_before_getting_ip() -> Non
 async def test_handle_build_pod_message_unknown_runtime_acks_silently() -> None:
     msg_body = BuildPodMessage(bot_id=5, runtime_key="cobol-85")
 
-    message = _make_message(msg_body.model_dump_json().encode())
+    message = make_amqp_message(msg_body.model_dump_json().encode())
     channel = MagicMock()
     channel.default_exchange.publish = AsyncMock()
     core_v1 = MagicMock()
@@ -197,7 +188,7 @@ async def test_handle_build_pod_message_unknown_runtime_acks_silently() -> None:
 async def test_handle_build_pod_message_bot_not_found_acks_silently() -> None:
     msg_body = BuildPodMessage(bot_id=999, runtime_key="python-3.14")
 
-    message = _make_message(msg_body.model_dump_json().encode())
+    message = make_amqp_message(msg_body.model_dump_json().encode())
     channel = MagicMock()
     channel.default_exchange.publish = AsyncMock()
     core_v1 = MagicMock()
@@ -225,7 +216,7 @@ async def test_handle_build_pod_message_bot_not_found_acks_silently() -> None:
 
 
 async def test_handle_build_pod_message_invalid_json_acks_silently() -> None:
-    message = _make_message(b"not json at all")
+    message = make_amqp_message(b"not json at all")
     channel = MagicMock()
     channel.default_exchange.publish = AsyncMock()
     core_v1 = MagicMock()
@@ -246,7 +237,7 @@ async def test_handle_build_pod_message_publishes_to_correct_queue() -> None:
     bot = _make_bot_mock(3, source=b"# bot")
     msg_body = BuildPodMessage(bot_id=3, runtime_key="python-3.14")
 
-    message = _make_message(msg_body.model_dump_json().encode())
+    message = make_amqp_message(msg_body.model_dump_json().encode())
     channel = MagicMock()
     channel.default_exchange.publish = AsyncMock()
     core_v1 = MagicMock()
@@ -264,6 +255,7 @@ async def test_handle_build_pod_message_publishes_to_correct_queue() -> None:
         patch("dispatcher.pod_builder.get_session", return_value=session_ctx),
         patch("dispatcher.pod_builder.BotRepository", return_value=bot_repo_instance),
         patch("dispatcher.pod_builder.build_bot_pod_manifest", return_value={}),
+        patch("dispatcher.pod_builder.wait_for_pod_ready"),
         patch("dispatcher.pod_builder.get_pod_ip", return_value="10.0.0.3"),
         patch("dispatcher.pod_builder.wait_for_http_ready"),
         patch("asyncio.get_running_loop") as mock_loop,
@@ -276,3 +268,51 @@ async def test_handle_build_pod_message_publishes_to_correct_queue() -> None:
 
     kwargs = channel.default_exchange.publish.call_args[1]
     assert kwargs["routing_key"] == POD_READY_QUEUE
+
+
+# ---------------------------------------------------------------------------
+# Published message has PERSISTENT delivery mode
+# ---------------------------------------------------------------------------
+
+
+async def test_handle_build_pod_message_publishes_with_persistent_delivery() -> None:
+    import aio_pika as _aio_pika
+
+    bot = _make_bot_mock(3, source=b"# bot")
+    msg_body = BuildPodMessage(bot_id=3, runtime_key="python-3.14")
+
+    message = make_amqp_message(msg_body.model_dump_json().encode())
+    channel = MagicMock()
+    channel.default_exchange.publish = AsyncMock()
+    core_v1 = MagicMock()
+
+    session = MagicMock()
+    session_ctx = AsyncMock()
+    session_ctx.__aenter__ = AsyncMock(return_value=session)
+    session_ctx.__aexit__ = AsyncMock(return_value=None)
+
+    bot_repo_instance = MagicMock()
+    bot_repo_instance.by_ids = AsyncMock(return_value={3: bot})
+    bot_repo_instance.set_pod_ready = AsyncMock()
+
+    with (
+        patch("dispatcher.pod_builder.get_session", return_value=session_ctx),
+        patch("dispatcher.pod_builder.BotRepository", return_value=bot_repo_instance),
+        patch("dispatcher.pod_builder.build_bot_pod_manifest", return_value={}),
+        patch("dispatcher.pod_builder.wait_for_pod_ready"),
+        patch("dispatcher.pod_builder.get_pod_ip", return_value="10.0.0.3"),
+        patch("dispatcher.pod_builder.wait_for_http_ready"),
+        patch("asyncio.get_running_loop") as mock_loop,
+    ):
+        from collections.abc import Callable
+
+        async def fake_run_in_executor(
+            executor: object, fn: Callable[[], None], *args: object
+        ) -> None:
+            fn()
+
+        mock_loop.return_value.run_in_executor = fake_run_in_executor
+        await handle_build_pod_message(message, channel, core_v1)
+
+    published = channel.default_exchange.publish.call_args[0][0]
+    assert published.delivery_mode == _aio_pika.DeliveryMode.PERSISTENT

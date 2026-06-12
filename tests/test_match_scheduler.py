@@ -2,24 +2,13 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import aio_pika
-
 from match_scheduler.main import handle_pod_ready_message
 from messaging.contracts import MATCH_ONDECK_QUEUE, MatchOndeck, PodReadyMessage
+from tests.conftest import make_amqp_message
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _make_message(body: bytes) -> MagicMock:
-    msg = MagicMock(spec=aio_pika.IncomingMessage)
-    msg.body = body
-    msg.process = MagicMock(return_value=AsyncMock().__aenter__.return_value)
-    msg.ack = AsyncMock()
-    msg.process.return_value.__aenter__ = AsyncMock(return_value=None)
-    msg.process.return_value.__aexit__ = AsyncMock(return_value=None)
-    return msg
 
 
 def _make_bot_mock(bot_id: int) -> MagicMock:
@@ -50,7 +39,7 @@ async def test_handle_pod_ready_message_publishes_self_pair() -> None:
     bot = _make_bot_mock(new_bot_id)
     msg_body = PodReadyMessage(bot_id=new_bot_id)
 
-    message = _make_message(msg_body.model_dump_json().encode())
+    message = make_amqp_message(msg_body.model_dump_json().encode())
     channel = MagicMock()
     channel.default_exchange.publish = AsyncMock()
 
@@ -83,7 +72,7 @@ async def test_handle_pod_ready_message_publishes_both_directions_for_other_bots
     other_bot = _make_bot_mock(other_bot_id)
     msg_body = PodReadyMessage(bot_id=new_bot_id)
 
-    message = _make_message(msg_body.model_dump_json().encode())
+    message = make_amqp_message(msg_body.model_dump_json().encode())
     channel = MagicMock()
     channel.default_exchange.publish = AsyncMock()
 
@@ -119,7 +108,7 @@ async def test_handle_pod_ready_message_correlation_ids_are_unique() -> None:
     other_bot = _make_bot_mock(other_bot_id)
     msg_body = PodReadyMessage(bot_id=new_bot_id)
 
-    message = _make_message(msg_body.model_dump_json().encode())
+    message = make_amqp_message(msg_body.model_dump_json().encode())
     channel = MagicMock()
     channel.default_exchange.publish = AsyncMock()
 
@@ -153,7 +142,7 @@ async def test_handle_pod_ready_message_uses_match_ondeck_queue() -> None:
     other_bot = _make_bot_mock(other_bot_id)
     msg_body = PodReadyMessage(bot_id=new_bot_id)
 
-    message = _make_message(msg_body.model_dump_json().encode())
+    message = make_amqp_message(msg_body.model_dump_json().encode())
     channel = MagicMock()
     channel.default_exchange.publish = AsyncMock()
 
@@ -176,7 +165,7 @@ async def test_handle_pod_ready_message_uses_match_ondeck_queue() -> None:
 
 
 async def test_handle_pod_ready_message_invalid_json_acks_silently() -> None:
-    message = _make_message(b"not valid json at all")
+    message = make_amqp_message(b"not valid json at all")
     channel = MagicMock()
     channel.default_exchange.publish = AsyncMock()
 
@@ -194,7 +183,7 @@ async def test_handle_pod_ready_message_no_ready_bots_publishes_nothing() -> Non
     new_bot_id = 7
     msg_body = PodReadyMessage(bot_id=new_bot_id)
 
-    message = _make_message(msg_body.model_dump_json().encode())
+    message = make_amqp_message(msg_body.model_dump_json().encode())
     channel = MagicMock()
     channel.default_exchange.publish = AsyncMock()
 
@@ -207,3 +196,31 @@ async def test_handle_pod_ready_message_no_ready_bots_publishes_nothing() -> Non
         await handle_pod_ready_message(message, channel)
 
     channel.default_exchange.publish.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Published MatchOndeck messages use PERSISTENT delivery
+# ---------------------------------------------------------------------------
+
+
+async def test_handle_pod_ready_message_publishes_with_persistent_delivery() -> None:
+    import aio_pika as _aio_pika
+
+    new_bot_id = 8
+    bot = _make_bot_mock(new_bot_id)
+    msg_body = PodReadyMessage(bot_id=new_bot_id)
+
+    message = make_amqp_message(msg_body.model_dump_json().encode())
+    channel = MagicMock()
+    channel.default_exchange.publish = AsyncMock()
+
+    session_ctx, bot_repo_instance = _make_session_ctx([bot])
+
+    with (
+        patch("match_scheduler.main.get_session", return_value=session_ctx),
+        patch("match_scheduler.main.BotRepository", return_value=bot_repo_instance),
+    ):
+        await handle_pod_ready_message(message, channel)
+
+    published = channel.default_exchange.publish.call_args[0][0]
+    assert published.delivery_mode == _aio_pika.DeliveryMode.PERSISTENT
