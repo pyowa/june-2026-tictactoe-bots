@@ -2,4 +2,17 @@ kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
   - role: control-plane
+    extraPortMappings:
+      - containerPort: 30000   # web NodePort → host 8000
+        hostPort: 8000
+        protocol: TCP
+      - containerPort: 30001   # RabbitMQ management NodePort → host 15672
+        hostPort: 15672
+        protocol: TCP
+      - containerPort: 30002   # RabbitMQ AMQP NodePort → host 5672
+        hostPort: 5672
+        protocol: TCP
+      - containerPort: 30003   # Postgres NodePort → host 5432
+        hostPort: 5432
+        protocol: TCP
   - role: worker

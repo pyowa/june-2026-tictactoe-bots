@@ -85,7 +85,7 @@ Open the web UI at `http://localhost:8000` and upload your `.py` file. The first
 
 - [uv](https://docs.astral.sh/uv/) (Python package manager)
 - Python 3.11+
-- Docker (runs Postgres for tests; builds all app images)
+- Docker (builds all app images)
 - [kind](https://kind.sigs.k8s.io/) + kubectl (via `nix develop` — runs the full app stack)
 
 ### Setup
@@ -94,9 +94,6 @@ Open the web UI at `http://localhost:8000` and upload your `.py` file. The first
 git clone <repo>
 cd tic-tac-toe-event
 uv sync --group dev
-
-# Start Postgres (needed for tests)
-docker compose up -d
 ```
 
 ### Start
@@ -158,7 +155,7 @@ The full stack runs in a local [kind](https://kind.sigs.k8s.io/) Kubernetes clus
 - **`platform`** — `postgres` (StatefulSet), `rabbitmq` (Deployment), `web` (Deployment + NodePort 30000→host 8000), `match-scheduler` (Deployment)
 - **`bots`** — `dispatcher` (Deployment) + one Pod per uploaded bot
 
-Docker Compose runs only `db` (Postgres on port 5432) for `uv run poe test` — the test suite needs a real Postgres but doesn't need RabbitMQ. Mutation testing (`docker compose --profile mutmut run --rm mutmut`) also uses just `db`.
+Docker Compose runs only the `mutmut` profile service — mutation testing connects back to the kind cluster's Postgres via `host.docker.internal`. Postgres (5432) and RabbitMQ AMQP (5672) are exposed to the host via NodePorts, so `uv run poe test`, `uv run poe seed-examples`, and `uv run poe reset-db` all work without any extra setup once the cluster is running.
 
 #### 1. Uploading a bot
 
@@ -308,7 +305,7 @@ Stack: FastAPI · SQLAlchemy 2.x (async, `asyncpg`) on Postgres · RabbitMQ (`ai
 
 ### Mutation testing
 
-mutmut v3 hardcodes `os.fork()`, which segfaults on macOS + Python 3.14. Run it in Docker instead (requires `docker compose up -d` for Postgres):
+mutmut v3 hardcodes `os.fork()`, which segfaults on macOS + Python 3.14. Run it in Docker instead (requires the kind cluster to be running — mutmut connects to Postgres via `host.docker.internal`):
 
 ```bash
 # Run mutations (slow — 30-60 min). Results are saved to mutants/**/*.meta.
