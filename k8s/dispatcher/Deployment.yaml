@@ -20,9 +20,15 @@ spec:
           imagePullPolicy: Never  # loaded via `kind load docker-image`
           env:
             - name: RABBITMQ_URL
-              value: amqp://guest:guest@host.docker.internal:5672/
+              valueFrom:
+                secretKeyRef:
+                  name: dispatcher
+                  key: RABBITMQ_URL
             - name: DATABASE_URL
-              value: postgresql+asyncpg://ttt:ttt@host.docker.internal:5432/ttt
+              valueFrom:
+                secretKeyRef:
+                  name: dispatcher
+                  key: DATABASE_URL
             - name: POD_TIMEOUT
               value: "60"
           resources:

@@ -71,12 +71,35 @@ nix develop --command sh -c '
   kind get clusters 2>/dev/null | grep -q "^kind$" \
     && echo "cluster already exists" \
     || kind create cluster --config k8s/kind-cluster.yaml
+
+  # Platform namespace: postgres, rabbitmq, web, match-scheduler
+  kubectl apply -f k8s/platform/Namespace.yaml
+  kubectl apply -f k8s/platform/secrets/postgres.yaml
+  kubectl apply -f k8s/platform/secrets/rabbitmq.yaml
+  kubectl apply -f k8s/platform/postgres/StatefulSet.yaml
+  kubectl apply -f k8s/platform/postgres/Service.yaml
+  kubectl apply -f k8s/platform/rabbitmq/Deployment.yaml
+  kubectl apply -f k8s/platform/rabbitmq/Service.yaml
+
+  echo "Waiting for postgres to be ready..."
+  kubectl rollout status statefulset/postgres -n platform --timeout=120s
+  echo "Waiting for rabbitmq to be ready..."
+  kubectl rollout status deployment/rabbitmq -n platform --timeout=120s
+
+  # Apply app Deployments (imagePullPolicy: Never — pods start once kind-load runs)
+  kubectl apply -f k8s/platform/web/Deployment.yaml
+  kubectl apply -f k8s/platform/web/Service.yaml
+  kubectl apply -f k8s/platform/match-scheduler/Deployment.yaml
+
+  # Bots namespace: dispatcher + bot pods
   kubectl create namespace bots --dry-run=client -o yaml | kubectl apply -f -
   kubectl apply -f k8s/network-policy.yaml
+  kubectl apply -f k8s/dispatcher/Secret.yaml
   kubectl apply -f k8s/dispatcher/ServiceAccount.yaml
   kubectl apply -f k8s/dispatcher/Role.yaml
   kubectl apply -f k8s/dispatcher/RoleBinding.yaml
   kubectl apply -f k8s/dispatcher/Deployment.yaml
+  echo "Infrastructure ready. Run: uv run poe kind-load"
 '
 """
 
@@ -85,7 +108,7 @@ nix develop --command sh -c '
 shell = "nix develop --command kind delete cluster"
 
 [tool.poe.tasks.build-images]
-# Build bot-runner images for all supported Python versions and the dispatcher.
+# Build bot-runner images for all supported Python versions, the dispatcher, web, and match-scheduler.
 shell = """
 set -e
 for ver in 3.10 3.11 3.12 3.13 3.14; do
@@ -94,6 +117,8 @@ for ver in 3.10 3.11 3.12 3.13 3.14; do
     bot-runner-images/python/
 done
 docker build -t pyowa/dispatcher:latest --target dispatcher .
+docker build -t pyowa/web:latest --target web .
+docker build -t pyowa/match-scheduler:latest --target match-scheduler .
 """
 
 [tool.poe.tasks.kind-load]
@@ -104,6 +129,17 @@ for ver in 3.10 3.11 3.12 3.13 3.14; do
   nix develop --command kind load docker-image pyowa/bot-runner-python:${ver}
 done
 nix develop --command kind load docker-image pyowa/dispatcher:latest
+nix develop --command kind load docker-image pyowa/web:latest
+nix develop --command kind load docker-image pyowa/match-scheduler:latest
+"""
+
+[tool.poe.tasks.reload-web]
+# Rebuild the web image, load it into kind, and restart the deployment.
+shell = """
+set -e
+docker build -t pyowa/web:latest --target web .
+nix develop --command kind load docker-image pyowa/web:latest
+kubectl rollout restart deployment/web -n platform
 """
 
 [tool.ruff]

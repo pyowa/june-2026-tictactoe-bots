@@ -85,7 +85,8 @@ Open the web UI at `http://localhost:8000` and upload your `.py` file. The first
 
 - [uv](https://docs.astral.sh/uv/) (Python package manager)
 - Python 3.11+
-- Docker (runs Postgres and RabbitMQ locally; also sandboxes each match)
+- Docker (runs Postgres for tests; builds all app images)
+- [kind](https://kind.sigs.k8s.io/) + kubectl (via `nix develop` — runs the full app stack)
 
 ### Setup
 
@@ -94,50 +95,33 @@ git clone <repo>
 cd tic-tac-toe-event
 uv sync --group dev
 
-docker compose up -d    # build + start the whole stack (db, rabbitmq, web, match_scheduler)
-```
-
-Migrations run automatically — the compose `migrate` service waits for Postgres to be healthy, runs `alembic upgrade head`, exits, and `web` only starts once it succeeds. To re-run after editing a migration, `docker compose run --rm migrate` (or `docker compose up -d migrate`).
-
-Defaults: Postgres at `postgresql+asyncpg://ttt:ttt@localhost:5432/ttt`, RabbitMQ at `amqp://guest:guest@localhost:5672/`. Inside containers the services talk via service names (`db`, `rabbitmq`); on the host they're at `localhost`. Override via `DATABASE_URL` / `RABBITMQ_URL`.
-
-### Start
-
-```bash
+# Start Postgres (needed for tests)
 docker compose up -d
 ```
 
-Brings up Postgres, RabbitMQ, the one-shot `migrate` job, web, and `match_scheduler` in the background. Open `http://localhost:8000`. Stream logs from any service with `docker compose logs -f <service>` (e.g. `web`, `match_scheduler`). `docker compose down` stops everything. RabbitMQ's management UI is at `http://localhost:15672` (`guest`/`guest`).
+### Start
 
-Source code is bind-mounted into the containers, so editing files under `web/`, `db/`, or `messaging/` is picked up immediately by the web server's `--reload`. `match_scheduler` does not auto-reload — restart it with `docker compose restart match_scheduler` after editing its code. Only `pyproject.toml` / `uv.lock` changes require a `docker compose build`.
-
-### Start the Kubernetes cluster (dispatcher)
-
-Bot pods and match execution run inside a local [kind](https://kind.sigs.k8s.io/) cluster. Use the `nix develop` shell — it provides `kind`, `kubectl`, and all other tooling.
+The full app runs in Kubernetes (kind). Use the `nix develop` shell — it provides `kind`, `kubectl`, and all other tooling.
 
 ```bash
-# Build the dispatcher and all bot-runner images (one per Python version)
+# Build all images (dispatcher, web, match-scheduler, bot-runners)
 uv run poe build-images
 
-# Create the cluster, apply RBAC + NetworkPolicy, deploy the dispatcher
+# Create the kind cluster, apply all manifests, wait for Postgres + RabbitMQ
 uv run poe kind-up
 
-# Load the images into kind (kind nodes can't pull from the host registry)
+# Load locally built images into kind — web, match-scheduler, and dispatcher start
 uv run poe kind-load
 ```
 
-The dispatcher connects back to the host's RabbitMQ and Postgres via `host.docker.internal`. Stream its logs with:
+Open `http://localhost:8000`. RabbitMQ management UI is at `http://localhost:15672` (`guest`/`guest`).
+
+Stream logs from any service:
 
 ```bash
+kubectl logs -n platform -l app=web -f
+kubectl logs -n platform -l app=match-scheduler -f
 kubectl logs -n bots -l app=dispatcher -f
-```
-
-After changing dispatcher code, rebuild and redeploy:
-
-```bash
-docker build -t pyowa/dispatcher:latest --target dispatcher .
-uv run poe kind-load
-kubectl rollout restart deployment/dispatcher -n bots
 ```
 
 Tear the cluster down entirely:
@@ -146,13 +130,35 @@ Tear the cluster down entirely:
 uv run poe kind-down
 ```
 
+After changing application code, rebuild and redeploy the relevant service:
+
+```bash
+# Web
+uv run poe reload-web
+
+# Dispatcher
+docker build -t pyowa/dispatcher:latest --target dispatcher .
+nix develop --command kind load docker-image pyowa/dispatcher:latest
+kubectl rollout restart deployment/dispatcher -n bots
+
+# Match scheduler
+docker build -t pyowa/match-scheduler:latest --target match-scheduler .
+nix develop --command kind load docker-image pyowa/match-scheduler:latest
+kubectl rollout restart deployment/match-scheduler -n platform
+```
+
 ---
 
 ## Developing the App
 
 ### Local architecture
 
-Everything runs in Docker Compose: `db` (Postgres), `rabbitmq`, `web`, and `match_scheduler`. The browser talks to the web; everything else talks via Postgres + RabbitMQ. Services find each other by service name (`db`, `rabbitmq`) over the compose network. Externally only the broker ports, the DB port, and `http://localhost:8000` are exposed. The `dispatcher` (running in the k8s cluster) handles all bot pod lifecycle and match execution.
+The full stack runs in a local [kind](https://kind.sigs.k8s.io/) Kubernetes cluster. All services are visible via `kubectl` in two namespaces:
+
+- **`platform`** — `postgres` (StatefulSet), `rabbitmq` (Deployment), `web` (Deployment + NodePort 30000→host 8000), `match-scheduler` (Deployment)
+- **`bots`** — `dispatcher` (Deployment) + one Pod per uploaded bot
+
+Docker Compose runs only `db` (Postgres on port 5432) for `uv run poe test` — the test suite needs a real Postgres but doesn't need RabbitMQ. Mutation testing (`docker compose --profile mutmut run --rm mutmut`) also uses just `db`.
 
 #### 1. Uploading a bot
 
@@ -279,7 +285,7 @@ tic-tac-toe-event/
 
 Database access uses **per-entity repositories**: a `BotRepository(session)`, `MatchRepository(session)`, or `MoveRepository(session)` co-locates every query that returns rows shaped like that entity. Cross-entity queries (the leaderboard joins bots + matches; it returns Bot-shaped rows, so it lives on `BotRepository`) live with the entity they project. Routes receive a repo via FastAPI `Depends(get_bots)` (defined in `web/dependencies.py`); tests substitute fakes with `app.dependency_overrides[get_bots] = lambda: ...`. Non-route callers (match_scheduler, scripts) open a session with `async with get_session() as session: BotRepository(session)`.
 
-Stack: FastAPI · SQLAlchemy 2.x (async, `asyncpg`) on Postgres · RabbitMQ (`aio-pika`) for match queueing · Alembic for migrations · Docker Compose for the local stack (Postgres, RabbitMQ, web, match_scheduler) — built from a single multi-stage `Dockerfile`. The dispatcher runs in Kubernetes and hosts `pod_builder` and `ondeck_handler` as concurrent consumers. Tests use a recording in-memory queue and an isolated `ttt_test` database on the running Postgres.
+Stack: FastAPI · SQLAlchemy 2.x (async, `asyncpg`) on Postgres · RabbitMQ (`aio-pika`) for match queueing · Alembic for migrations · [kind](https://kind.sigs.k8s.io/) for the local k8s cluster — all services built from a single multi-stage `Dockerfile`. The dispatcher runs in the `bots` namespace and hosts `pod_builder` and `ondeck_handler` as concurrent consumers. Docker Compose runs only Postgres (for the test suite). Tests use a recording in-memory queue and an isolated `ttt_test` database on the running Postgres.
 
 ### Common tasks
 
@@ -293,15 +299,16 @@ Stack: FastAPI · SQLAlchemy 2.x (async, `asyncpg`) on Postgres · RabbitMQ (`ai
 | `uv run poe format` | Auto-format with ruff |
 | `uv run poe typecheck` | Type-check with ty |
 | `uv run poe check` | Run lint + lint-md + typecheck + test in sequence |
-| `uv run poe acceptance` | Live-stack acceptance tests against the running compose+k8s stack. Opt-in — not part of `poe check`. |
-| `uv run poe build-images` | Build the dispatcher and all bot-runner images (one per Python version) |
-| `uv run poe kind-load` | Load locally built images into the kind cluster |
-| `uv run poe kind-up` | Create the kind cluster, apply RBAC + NetworkPolicy, deploy the dispatcher (idempotent) |
+| `uv run poe acceptance` | Live-stack acceptance tests against the running k8s stack. Opt-in — not part of `poe check`. |
+| `uv run poe build-images` | Build all images: dispatcher, web, match-scheduler, and bot-runners (one per Python version) |
+| `uv run poe kind-load` | Load all locally built images into the kind cluster |
+| `uv run poe kind-up` | Create the kind cluster, apply all manifests (platform + bots namespaces), wait for infra readiness (idempotent) |
 | `uv run poe kind-down` | Destroy the kind cluster |
+| `uv run poe reload-web` | Rebuild the web image, load it into kind, and restart the web Deployment |
 
 ### Mutation testing
 
-mutmut v3 hardcodes `os.fork()`, which segfaults on macOS + Python 3.14. Run it in Docker instead:
+mutmut v3 hardcodes `os.fork()`, which segfaults on macOS + Python 3.14. Run it in Docker instead (requires `docker compose up -d` for Postgres):
 
 ```bash
 # Run mutations (slow — 30-60 min). Results are saved to mutants/**/*.meta.
@@ -321,7 +328,8 @@ Models live in `entities/<name>/model.py` as SQLAlchemy ORM classes (one file pe
 ```bash
 uv run alembic revision --autogenerate -m "describe the change"
 # review the generated file under alembic/versions/, edit if needed
-docker compose run --rm migrate
+uv run poe reload-web   # rebuilds the web image (which bakes in alembic/) and restarts the Deployment
+                        # the init container runs alembic upgrade head on startup
 ```
 
 ### How matches run

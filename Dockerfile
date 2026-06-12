@@ -37,10 +37,19 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 # ---------------------------------------------------------------------------
-# web: FastAPI app served by uvicorn. --reload picks up bind-mounted source.
+# web: FastAPI app served by uvicorn.
+# Source is baked in for k8s; compose bind-mounts overlay it for dev --reload.
 # ---------------------------------------------------------------------------
 FROM base AS web
 EXPOSE 8000
+# Bake in all source modules needed by web and alembic migrations.
+COPY web/ ./web/
+COPY runner/ ./runner/
+COPY db/ ./db/
+COPY entities/ ./entities/
+COPY messaging/ ./messaging/
+COPY alembic/ ./alembic/
+COPY alembic.ini ./alembic.ini
 CMD ["uvicorn", "web.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
 # ---------------------------------------------------------------------------
@@ -69,7 +78,12 @@ CMD ["python", "-m", "dispatcher.main"]
 
 # ---------------------------------------------------------------------------
 # match-scheduler: consumes matches.schedule, publishes MatchOndeck to matches.ondeck.
+# Source baked in; no bind mount needed.
 FROM base AS match-scheduler
+COPY match_scheduler/ ./match_scheduler/
+COPY messaging/ ./messaging/
+COPY db/ ./db/
+COPY entities/ ./entities/
 CMD ["python", "-m", "match_scheduler.main"]
 
 # ---------------------------------------------------------------------------

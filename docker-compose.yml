@@ -17,107 +17,10 @@ services:
       timeout: 3s
       retries: 20
 
-  rabbitmq:
-    image: rabbitmq:3-management
-    ports:
-      - "5672:5672"    # AMQP
-      - "15672:15672"  # management UI: http://localhost:15672 (guest/guest)
-    healthcheck:
-      # `ping` alone passes when the Erlang VM is up but BEFORE the AMQP
-      # listener is accepting connections — consumers then crash on first
-      # connect. `check_port_connectivity` only passes once the listener is
-      # actually bound, so dependents start safely.
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
-      interval: 5s
-      timeout: 10s
-      retries: 20
-      start_period: 10s
-
-  # One-shot migration runner. Starts after `db` is healthy, runs
-  # `alembic upgrade head`, and exits. `web` waits on this via
-  # `service_completed_successfully` so it never starts against an
-  # un-migrated schema. Reuses the `web` image (has alembic + the models).
-  # On warm start (no pending migrations) this exits in <1s.
-  migrate:
-    build:
-      context: .
-      target: web
-      args:
-        PY_VERSION: "3.13"
-    environment:
-      DATABASE_URL: postgresql+asyncpg://ttt:ttt@db:5432/ttt
-    command: ["alembic", "upgrade", "head"]
-    depends_on:
-      db:
-        condition: service_healthy
-    volumes:
-      - ./web:/app/web
-      - ./runner:/app/runner
-      - ./db:/app/db
-      - ./entities:/app/entities
-      - ./messaging:/app/messaging
-      - ./alembic:/app/alembic
-      - ./alembic.ini:/app/alembic.ini
-    restart: "no"
-
-  web:
-    build:
-      context: .
-      target: web
-      args:
-        PY_VERSION: "3.13"
-    environment:
-      DATABASE_URL: postgresql+asyncpg://ttt:ttt@db:5432/ttt
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
-    ports:
-      - "8000:8000"
-    depends_on:
-      db:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
-      rabbitmq:
-        condition: service_healthy
-    volumes:
-      - ./web:/app/web
-      - ./runner:/app/runner
-      - ./db:/app/db
-      - ./entities:/app/entities
-      - ./messaging:/app/messaging
-      - ./alembic:/app/alembic
-      - ./alembic.ini:/app/alembic.ini
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/ || exit 1"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-
-  match_scheduler:
-    build:
-      context: .
-      target: match-scheduler
-      args:
-        PY_VERSION: "3.13"
-    environment:
-      DATABASE_URL: postgresql+asyncpg://ttt:ttt@db:5432/ttt
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
-    depends_on:
-      db:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
-      rabbitmq:
-        condition: service_healthy
-    volumes:
-      - ./match_scheduler:/app/match_scheduler
-      - ./db:/app/db
-      - ./entities:/app/entities
-      - ./messaging:/app/messaging
-
   # Mutation testing via mutmut. Only starts when explicitly requested:
   #   docker compose --profile mutmut run --rm mutmut
-  # Depends on `db` (session test hits a real DB) and `migrate` (needs the
-  # schema). No RabbitMQ dependency — tests mock the broker.
+  # Depends on `db` (session test hits a real DB). No RabbitMQ dependency —
+  # tests mock the broker.
   mutmut:
     profiles: [mutmut]
     build:
@@ -134,8 +37,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
     volumes:
       - ./web:/app/web
       - ./runner:/app/runner
