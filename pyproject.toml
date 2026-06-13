@@ -72,11 +72,22 @@ nix develop --command sh -c '
     && echo "cluster already exists" \
     || kind create cluster --config k8s/kind-cluster.yaml
 
-  kubectl apply -k k8s/platform/
+  helm repo add bitnami https://charts.bitnami.com/bitnami 2>/dev/null || true
+  helm repo update
+
+  kubectl apply -f k8s/platform/Namespace.yaml
+
+  helm upgrade --install postgres bitnami/postgresql \
+    -n platform -f k8s/platform/values/postgres.yaml
+  helm upgrade --install rabbitmq bitnami/rabbitmq \
+    -n platform -f k8s/platform/values/rabbitmq.yaml
+
   echo "Waiting for postgres to be ready..."
-  kubectl rollout status statefulset/postgres -n platform --timeout=120s
+  kubectl rollout status statefulset/postgres-postgresql -n platform --timeout=180s
   echo "Waiting for rabbitmq to be ready..."
-  kubectl rollout status deployment/rabbitmq -n platform --timeout=120s
+  kubectl rollout status deployment/rabbitmq -n platform --timeout=180s
+
+  kubectl apply -k k8s/platform/
 
   kubectl create namespace bots --dry-run=client -o yaml | kubectl apply -f -
   kubectl apply -f k8s/network-policy.yaml
@@ -140,6 +151,9 @@ ignore = ["ANN401"]
 addopts = "--cov=web --cov=db --cov=entities --cov=runner --cov=messaging --cov=scripts --cov-report=term-missing --ignore=tests/acceptance"
 asyncio_mode = "auto"
 norecursedirs = ["mutants"]
+# Needed for mutmut: it runs pytest from /app/mutants/ where dispatcher,
+# match_scheduler etc. aren't on sys.path. This adds /app explicitly.
+pythonpath = ["/app"]
 markers = [
     "acceptance: live-stack acceptance test against the running compose+k8s stack; opt-in via `poe acceptance`",
 ]
