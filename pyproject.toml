@@ -99,15 +99,7 @@ paths_to_mutate = [
     "messaging/",
     "scripts/",
 ]
-# Files excluded from mutation testing because they contain only live-broker
-# or live-database wiring that cannot be unit-tested without a real service.
-# These files are already excluded from coverage via `# pragma: no cover`.
-do_not_mutate = [
-    "messaging/connection.py",
-    "messaging/rpc_server.py",
-    "scripts/reset_db.py",
-    "scripts/seed_example_bots.py",
-]
+do_not_mutate = [ ]
 tests_dir = ["tests/"]
 # Disable coverage during mutation runs. mutmut runs pytest from inside
 # mutants/ where all source files are trampoline-padded (hundreds of

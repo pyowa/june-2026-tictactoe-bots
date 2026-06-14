@@ -72,6 +72,12 @@ def test_pick_runtime_key_non_python_family_falls_back_to_first() -> None:
     assert pick_runtime_key("rust-1.75", "python-3.13") == "rust-1.75"
 
 
+def test_pick_runtime_key_equal_versions_returns_first_arg() -> None:
+    # When ta == tb the `>=` comparison is True, so `a` is returned.
+    # Mutant: `>` would return `b` for equal versions.
+    assert pick_runtime_key("python-3.13", "python-3.13") == "python-3.13"
+
+
 def test_turn_queue_for_strips_dots() -> None:
     assert turn_queue_for("3") == "turn.py3.requests"
     assert turn_queue_for("3.11") == "turn.py311.requests"
@@ -345,10 +351,12 @@ async def test_ensure_connected_opens_connection_when_none() -> None:
     from messaging.contracts import BUILD_POD_QUEUE
 
     mock_connect.assert_awaited_once_with("amqp://test")
-    declared = [
-        call.args for call in mock_channel.declare_queue.await_args_list
-    ]
-    assert (BUILD_POD_QUEUE,) in declared
+    declare_calls = {
+        call.args[0]: call.kwargs
+        for call in mock_channel.declare_queue.await_args_list
+    }
+    assert BUILD_POD_QUEUE in declare_calls
+    assert declare_calls[BUILD_POD_QUEUE].get("durable") is True
     assert channel is mock_channel
     assert queue._connection is mock_connection
 

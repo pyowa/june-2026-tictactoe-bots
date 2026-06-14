@@ -831,3 +831,43 @@ async def test_match_detail_back_url_is_accessible_in_template(client, engine) -
     # &larr; appears only in the back-link <a>, not in the nav. If back_url
     # is undefined, the rendered href is "" and this check fails.
     assert 'href="/matches">&larr;' in resp.text
+
+
+# ---------------------------------------------------------------------------
+# Leaderboard — draws/lifetime_wins/lifetime_losses edge cases
+# ---------------------------------------------------------------------------
+
+
+async def test_leaderboard_draw_as_o_counted_in_draws(engine: AsyncEngine) -> None:
+    """draws must count matches where the bot played as O, not only as X.
+    Guards the or_(bot_x_id == lb_id, bot_o_id == lb_id) participation filter."""
+    bot = await db_insert_bot(engine, "ODrawBot")
+    other = await db_insert_bot(engine, "Other")
+    await db_insert_match(engine, other, bot, winner_id=None, result="cat")
+    lb = await _leaderboard(engine)
+    assert lb["ODrawBot"].draws == 1
+
+
+async def test_leaderboard_lifetime_losses_intra_family_excluded(
+    engine: AsyncEngine,
+) -> None:
+    """lifetime_losses must not count intra-family matches (FooV1 vs FooV2).
+    Guards the or_(bx.base_name != lb_base, bo.base_name != lb_base) filter."""
+    v1 = await db_insert_bot(engine, "FamLoss", version=1, versioned_name="FamLoss")
+    v2 = await db_insert_bot(engine, "FamLoss", version=2, versioned_name="FamLossV2")
+    await db_insert_match(engine, v1, v2, winner_id=v2, result="o_wins")
+    lb = await _leaderboard(engine)
+    assert lb["FamLoss"].lifetime_losses == 0
+
+
+async def test_leaderboard_lifetime_losses_requires_participation(
+    engine: AsyncEngine,
+) -> None:
+    """lifetime_losses must only count matches where the family actually played.
+    Guards the or_(bx.base_name == lb_base, bo.base_name == lb_base) filter."""
+    await db_insert_bot(engine, "Watcher")
+    b = await db_insert_bot(engine, "FighterA")
+    c = await db_insert_bot(engine, "FighterB")
+    await db_insert_match(engine, b, c, winner_id=b, result="x_wins")
+    lb = await _leaderboard(engine)
+    assert lb["Watcher"].lifetime_losses == 0

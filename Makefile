@@ -3,7 +3,7 @@ SHELL := /bin/bash
 .DEFAULT_GOAL := check
 
 .PHONY: test lint lint-md format typecheck check \
-        seed-examples reset-db mutate acceptance \
+        seed-examples reset-db mutate mutate-results acceptance \
         kind-up kind-down build-images kind-load reload-web
 
 # ── Python / dev ──────────────────────────────────────────────────────────────
@@ -32,7 +32,12 @@ reset-db:
 	uv run python -m scripts.reset_db
 
 mutate:
-	uv run mutmut run
+	docker compose --profile mutmut run --rm \
+	  $(if $(FILE),--entrypoint "uv run mutmut run --max-children 1 --paths-to-mutate $(FILE)",) \
+	  mutmut
+
+mutate-results:
+	uv run mutmut results
 
 acceptance:
 	uv run pytest tests/acceptance/ -o addopts=--no-cov -v

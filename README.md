@@ -320,12 +320,12 @@ Stack: FastAPI · SQLAlchemy 2.x (async, `asyncpg`) on Postgres · RabbitMQ (`ai
 mutmut v3 hardcodes `os.fork()`, which segfaults on macOS + Python 3.14. Run it in Docker instead (requires the kind cluster to be running — mutmut connects to Postgres via `host.docker.internal`):
 
 ```bash
-# Run mutations (slow — 30-60 min). Results are saved to mutants/**/*.meta.
-docker compose --profile mutmut run --rm mutmut
+make mutate                                        # full run (slow — 30-60 min)
+make mutate FILE=entities/bot/repository.py        # scope to one file
 
 # After the run, inspect results locally:
-uv run mutmut results          # list all surviving mutants
-uv run mutmut show <id>        # show the diff for a specific mutant
+make mutate-results                # list all surviving mutants
+uv run mutmut show <id>            # show the diff for a specific mutant
 ```
 
 mutmut v3 stores results as JSON `.meta` files under `mutants/` (gitignored, bind-mounted into the container). Reruns resume from where they left off — mutmut skips mutants whose `.meta` file already exists.
