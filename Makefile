@@ -1,0 +1,82 @@
+.ONESHELL:
+SHELL := /bin/bash
+.DEFAULT_GOAL := check
+
+.PHONY: test lint lint-md format typecheck check \
+        seed-examples reset-db mutate acceptance \
+        kind-up kind-down build-images kind-load reload-web
+
+# ── Python / dev ──────────────────────────────────────────────────────────────
+
+test:
+	uv run pytest
+
+lint:
+	uv run ruff check .
+
+lint-md:
+	uv run pymarkdown scan README.md TODO.md CLAUDE.md
+
+format:
+	uv run ruff format .
+
+typecheck:
+	uv run ty check web/ db/ entities/ runner/ messaging/ scripts/ tests/
+
+check: lint lint-md typecheck test
+
+seed-examples:
+	uv run python -m scripts.seed_example_bots
+
+reset-db:
+	uv run python -m scripts.reset_db
+
+mutate:
+	uv run mutmut run
+
+acceptance:
+	uv run pytest tests/acceptance/ -o addopts=--no-cov -v
+
+# ── Kubernetes / infrastructure ───────────────────────────────────────────────
+# Run these from inside the nix dev shell: nix develop
+
+kind-up: build-images
+	set -e
+	kind get clusters 2>/dev/null | grep -q '^kind$$' \
+	  && echo "cluster already exists" \
+	  || kind create cluster --config k8s/kind-cluster.yaml
+	kubectl apply -k k8s/
+	echo "Waiting for postgres to be ready..."
+	kubectl rollout status deployment/postgres -n platform --timeout=180s
+	echo "Waiting for rabbitmq to be ready..."
+	kubectl rollout status deployment/rabbitmq -n platform --timeout=180s
+	$(MAKE) kind-load
+
+kind-down:
+	kind delete cluster
+
+build-images:
+	set -e
+	for ver in 3.10 3.11 3.12 3.13 3.14; do
+	  docker build -t pyowa/bot-runner-python:$$ver \
+	    --build-arg PY_VERSION=$$ver \
+	    bot-runner-images/python/
+	done
+	docker build -t pyowa/dispatcher:latest --target dispatcher .
+	docker build -t pyowa/web:latest --target web .
+	docker build -t pyowa/match-scheduler:latest --target match-scheduler .
+
+kind-load:
+	set -e
+	for ver in 3.10 3.11 3.12 3.13 3.14; do
+	  kind load docker-image pyowa/bot-runner-python:$$ver
+	done
+	kind load docker-image pyowa/dispatcher:latest
+	kind load docker-image pyowa/web:latest
+	kind load docker-image pyowa/match-scheduler:latest
+
+reload-web:
+	set -e
+	docker build -t pyowa/web:latest --target web .
+	kind load docker-image pyowa/web:latest
+	kubectl rollout restart deployment/web -n platform

@@ -306,6 +306,23 @@ async def test_leaderboard_lifetime_losses_counted_as_x_and_as_o(engine) -> None
     assert lb["Foo"].lifetime_losses == 2
 
 
+async def test_leaderboard_self_play_forfeit_win_counts_in_lifetime(engine) -> None:
+    """A forfeit win earned via self-play must appear in both forfeit_wins and
+    lifetime_wins. Reproduces: bot with forfeit_wins=1 but lifetime_wins=0,
+    causing the lifetime record to display 0-N instead of 1-N."""
+    bot = await db_insert_bot(engine, "CrashBot")
+    other = await db_insert_bot(engine, "Other")
+    # Self-play: CrashBot X double-moves, CrashBot O wins → forfeit win
+    await db_insert_match(engine, bot, bot, winner_id=bot, result="x_forfeit")
+    # Normal loss against another bot
+    await db_insert_match(engine, bot, other, winner_id=other, result="x_forfeit")
+
+    lb = await _leaderboard(engine)
+    assert lb["CrashBot"].forfeit_wins == 1
+    assert lb["CrashBot"].lifetime_wins == 1
+    assert lb["CrashBot"].losses == 1
+
+
 # ---------------------------------------------------------------------------
 # Matches list
 # ---------------------------------------------------------------------------

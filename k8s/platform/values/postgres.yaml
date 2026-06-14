@@ -1,9 +1,0 @@
-auth:
-  username: ttt
-  password: ttt
-  database: ttt
-primary:
-  service:
-    type: NodePort
-    nodePorts:
-      postgresql: "30003"

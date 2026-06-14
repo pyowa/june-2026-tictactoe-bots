@@ -101,14 +101,8 @@ uv sync --group dev
 The full app runs in Kubernetes (kind). Use the `nix develop` shell — it provides `kind`, `kubectl`, and all other tooling.
 
 ```bash
-# Build all images (dispatcher, web, match-scheduler, bot-runners)
-uv run poe build-images
-
-# Create the kind cluster, apply all manifests, wait for Postgres + RabbitMQ
-uv run poe kind-up
-
-# Load locally built images into kind — web, match-scheduler, and dispatcher start
-uv run poe kind-load
+# Build images, create cluster, apply all manifests, wait for readiness, load images
+make kind-up
 ```
 
 Open `http://localhost:8000`. RabbitMQ management UI is at `http://localhost:15672` (`guest`/`guest`).
@@ -124,14 +118,14 @@ kubectl logs -n bots -l app=dispatcher -f
 Tear the cluster down entirely:
 
 ```bash
-uv run poe kind-down
+make kind-down
 ```
 
 After changing application code, rebuild and redeploy the relevant service:
 
 ```bash
 # Web
-uv run poe reload-web
+make reload-web
 
 # Dispatcher
 docker build -t pyowa/dispatcher:latest --target dispatcher .
@@ -148,6 +142,24 @@ kubectl rollout restart deployment/match-scheduler -n platform
 
 ## Developing the App
 
+### Tools
+
+All tools below are provided by the Nix dev shell (`nix develop`). You don't install them separately.
+
+| Tool | What it does |
+|---|---|
+| **uv** | Python package manager. Manages dependencies (`uv sync`) and runs Python dev tasks invoked by `make`. |
+| **python3.13** | The Python interpreter. Nix pins this so the version is consistent across machines. |
+| **postgresql_16 client** | `psql`, `pg_isready`, `pg_dump` — client tools for talking to Postgres. The server itself runs in the kind cluster. |
+| **colima** | Lightweight container runtime for macOS. Replaces Docker Desktop. |
+| **docker / docker-compose** | Container CLI and multi-container runner. Used to build images and run mutation testing. |
+| **kind** | Kubernetes IN Docker. Spins up a local k8s cluster inside Docker containers — `make kind-up` / `make kind-down`. |
+| **kubectl** | Kubernetes CLI. Apply manifests, stream logs, exec into pods. `kubectl apply -k` uses the built-in Kustomize support. |
+| **kustomize** | Bundled into `kubectl apply -k`. Assembles a list of YAML manifests and applies them in one shot — `kubectl apply -k k8s/` brings up the entire stack. |
+| **k9s** | Terminal UI for the Kubernetes cluster. Browse pods, stream logs, exec shells, all from the keyboard. |
+| **jq** | JSON processor for the command line. Useful for parsing `kubectl` output. |
+| **curl** | HTTP client. Handy for hitting service endpoints directly. |
+
 ### Local architecture
 
 The full stack runs in a local [kind](https://kind.sigs.k8s.io/) Kubernetes cluster. All services are visible via `kubectl` in two namespaces:
@@ -155,7 +167,7 @@ The full stack runs in a local [kind](https://kind.sigs.k8s.io/) Kubernetes clus
 - **`platform`** — `postgres` (StatefulSet), `rabbitmq` (Deployment), `web` (Deployment + NodePort 30000→host 8000), `match-scheduler` (Deployment)
 - **`bots`** — `dispatcher` (Deployment) + one Pod per uploaded bot
 
-Docker Compose runs only the `mutmut` profile service — mutation testing connects back to the kind cluster's Postgres via `host.docker.internal`. Postgres (5432) and RabbitMQ AMQP (5672) are exposed to the host via NodePorts, so `uv run poe test`, `uv run poe seed-examples`, and `uv run poe reset-db` all work without any extra setup once the cluster is running.
+Docker Compose runs only the `mutmut` profile service — mutation testing connects back to the kind cluster's Postgres via `host.docker.internal`. Postgres (5432) and RabbitMQ AMQP (5672) are exposed to the host via NodePorts, so `make test`, `make seed-examples`, and `make reset-db` all work without any extra setup once the cluster is running.
 
 #### 1. Uploading a bot
 
@@ -275,7 +287,7 @@ tic-tac-toe-event/
 ├── db/                        # base.py (DeclarativeBase) + session.py (async engine, session factory, get_session helper). No queries live here.
 ├── messaging/                 # Queue + RPC abstraction; RabbitMQ implementation; contracts.py
 ├── k8s/                       # Kubernetes manifests (NetworkPolicy, dispatcher Deployment/Role/etc.)
-├── example_bots/              # Reference bots; `poe seed-examples` loads these into the DB
+├── example_bots/              # Reference bots; `make seed-examples` loads these into the DB
 ├── alembic/                   # Migration scripts (versions/)
 └── tests/                     # Test suite
 ```
@@ -288,20 +300,20 @@ Stack: FastAPI · SQLAlchemy 2.x (async, `asyncpg`) on Postgres · RabbitMQ (`ai
 
 | Command | Description |
 |---|---|
-| `uv run poe reset-db` | Drop & recreate the DB **and** purge every RabbitMQ queue (so no stale match jobs linger from the previous DB) |
-| `uv run poe seed-examples` | Wipe bots/matches/moves, insert every file under `example_bots/` as a bot (multiple files sharing a `name:` auto-version), then publish `BuildPodMessage` for each bot on `matches.build` |
-| `uv run poe test` | Run the test suite with coverage |
-| `uv run poe lint` | Check code with ruff |
-| `uv run poe lint-md` | Lint Markdown files with pymarkdown |
-| `uv run poe format` | Auto-format with ruff |
-| `uv run poe typecheck` | Type-check with ty |
-| `uv run poe check` | Run lint + lint-md + typecheck + test in sequence |
-| `uv run poe acceptance` | Live-stack acceptance tests against the running k8s stack. Opt-in — not part of `poe check`. |
-| `uv run poe build-images` | Build all images: dispatcher, web, match-scheduler, and bot-runners (one per Python version) |
-| `uv run poe kind-load` | Load all locally built images into the kind cluster |
-| `uv run poe kind-up` | Create the kind cluster, apply all manifests (platform + bots namespaces), wait for infra readiness (idempotent) |
-| `uv run poe kind-down` | Destroy the kind cluster |
-| `uv run poe reload-web` | Rebuild the web image, load it into kind, and restart the web Deployment |
+| `make reset-db` | Drop & recreate the DB **and** purge every RabbitMQ queue (so no stale match jobs linger from the previous DB) |
+| `make seed-examples` | Wipe bots/matches/moves, insert every file under `example_bots/` as a bot (multiple files sharing a `name:` auto-version), then publish `BuildPodMessage` for each bot on `matches.build` |
+| `make test` | Run the test suite with coverage |
+| `make lint` | Check code with ruff |
+| `make lint-md` | Lint Markdown files with pymarkdown |
+| `make format` | Auto-format with ruff |
+| `make typecheck` | Type-check with ty |
+| `make check` | Run lint + lint-md + typecheck + test in sequence |
+| `make acceptance` | Live-stack acceptance tests against the running k8s stack. Opt-in — not part of `make check`. |
+| `make build-images` | Build all images: dispatcher, web, match-scheduler, and bot-runners (one per Python version) |
+| `make kind-load` | Load locally built images into the kind cluster |
+| `make kind-up` | Full stack bring-up: build images, create cluster, apply all manifests, wait for readiness, load images |
+| `make kind-down` | Destroy the kind cluster |
+| `make reload-web` | Rebuild the web image, load it into kind, and restart the web Deployment |
 
 ### Mutation testing
 
@@ -325,7 +337,7 @@ Models live in `entities/<name>/model.py` as SQLAlchemy ORM classes (one file pe
 ```bash
 uv run alembic revision --autogenerate -m "describe the change"
 # review the generated file under alembic/versions/, edit if needed
-uv run poe reload-web   # rebuilds the web image (which bakes in alembic/) and restarts the Deployment
+make reload-web   # rebuilds the web image (which bakes in alembic/) and restarts the Deployment
                         # the init container runs alembic upgrade head on startup
 ```
 

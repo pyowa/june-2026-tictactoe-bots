@@ -4,6 +4,10 @@ resources:
   - Namespace.yaml
   - secrets/postgres.yaml
   - secrets/rabbitmq.yaml
+  - postgres/Deployment.yaml
+  - postgres/Service.yaml
+  - rabbitmq/Deployment.yaml
+  - rabbitmq/Service.yaml
   - web/Deployment.yaml
   - web/Service.yaml
   - match-scheduler/Deployment.yaml

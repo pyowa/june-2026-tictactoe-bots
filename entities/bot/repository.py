@@ -192,7 +192,11 @@ class BotRepository:
             .join(bw, bw.id == Match.winner_id)
             .where(
                 bw.base_name == lb_base,
-                or_(bx.base_name != lb_base, bo.base_name != lb_base),
+                or_(
+                    Match.bot_x_id == Match.bot_o_id,
+                    bx.base_name != lb_base,
+                    bo.base_name != lb_base,
+                ),
             )
             .scalar_subquery()
         )

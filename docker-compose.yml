@@ -2,7 +2,7 @@ services:
   # Mutation testing via mutmut. Only starts when explicitly requested:
   #   docker compose --profile mutmut run --rm mutmut
   # Connects to Postgres running in the kind cluster (exposed on host port 5432
-  # via NodePort 30003). Requires `uv run poe kind-up && uv run poe kind-load`.
+  # via NodePort 30003). Requires `make kind-up && make kind-load`.
   mutmut:
     profiles: [mutmut]
     build:
@@ -16,6 +16,7 @@ services:
       PGUSER: ttt
       PGPASSWORD: ttt
       PGDATABASE: ttt
+      PYTHONPATH: /app
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -24,6 +25,8 @@ services:
       - ./db:/app/db
       - ./entities:/app/entities
       - ./messaging:/app/messaging
+      - ./dispatcher:/app/dispatcher
+      - ./match_scheduler:/app/match_scheduler
       - ./scripts:/app/scripts
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini

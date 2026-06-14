@@ -8,16 +8,16 @@ When adding behavior, follow the red-green-refactor cycle:
 
 1. **Red.** Write the test first. Run it and confirm it fails. Read the failure message and verify it's failing for the reason you expect — not, e.g., a missing import, a typo in the test itself, or a fixture you haven't wired up.
 2. **Green.** Write the minimum production code that makes the test pass. Resist the urge to add adjacent features or "while I'm here" cleanups — those belong in the refactor step or a separate change.
-3. **Refactor.** With the suite green, look for cleanups: duplicate logic worth extracting, names worth sharpening, dead code worth deleting. Run `uv run poe check` after each refactor to confirm nothing regressed.
+3. **Refactor.** With the suite green, look for cleanups: duplicate logic worth extracting, names worth sharpening, dead code worth deleting. Run `make check` after each refactor to confirm nothing regressed.
 
 The red step is non-skippable. A test that's never been seen to fail provides no evidence that it'll catch a future regression. If you find yourself writing production code first, stop and back the test up before you continue.
 
-For non-feature work (renames, doc edits, dependency bumps) TDD doesn't apply — but `uv run poe check` still must be green at the end.
+For non-feature work (renames, doc edits, dependency bumps) TDD doesn't apply — but `make check` still must be green at the end.
 
 ## After every change
 
-- Run `uv run poe check` (lint + lint-md + typecheck + tests). Do not consider a step "done" until it's green.
-- If `poe check` fails, fix the underlying issue before moving on. Never disable a test, suppress a lint rule, weaken a type, or `# noqa` your way out to get green.
+- Run `make check` (lint + lint-md + typecheck + tests). Do not consider a step "done" until it's green.
+- If `make check` fails, fix the underlying issue before moving on. Never disable a test, suppress a lint rule, weaken a type, or `# noqa` your way out to get green.
 - If you genuinely cannot reach green within a reasonable number of attempts, STOP and report what's blocking you.
 
 ## Coverage
@@ -46,7 +46,7 @@ Core's `insert(Model).values({Model.field: value})` form gets you static type-ch
 
 When your change touches any of the below, update the docs **in the same change**, not "later":
 
-- `README.md` — when you change setup steps, the `poe` task table, the project layout, or the bot-author contract.
+- `README.md` — when you change setup steps, the `make` target table, the project layout, or the bot-author contract.
 - The mermaid sequence diagrams in `README.md` — when you change who talks to whom or in what order.
 - `TODO.md` — when you complete a listed bullet (check it off) or the planned architecture changes meaningfully.
 
@@ -56,7 +56,7 @@ When your change touches any of the below, update the docs **in the same change*
 - **Committing on feature branches is allowed**, but only when the user has explicitly asked for a commit or has given standing permission for the current task (e.g. "commit as you go on this branch"). Always confirm the current branch with `git branch --show-current` before committing. Never commit on `main`. Never amend a commit the user didn't ask you to amend. Never `push` unless explicitly asked.
 - **Destructive or hard-to-reverse git operations** (`reset --hard`, `restore`, `checkout -- .`, `clean -f`, `branch -D`, `stash drop`) require explicit user approval regardless of branch.
 - Read-only inspection (`git log`, `git diff`, `git status`, `git show`, `git blame`) is fine and encouraged when you need to understand context.
-- Drop database tables, run `poe reset-db`, or `docker compose down -v` outside of an explicitly-scoped task.
+- Drop database tables, run `make reset-db`, or `docker compose down -v` outside of an explicitly-scoped task.
 - Add a new top-level dependency without a real need. If you do need one, add it to `pyproject.toml` and run `uv sync`, and explain why in your response.
 - Introduce a new technology (queueing system, ORM, test framework, web framework) when an existing one in this project would do.
 - **Put code in `__init__.py`.** Package `__init__.py` files stay empty. No module-level state, no functions, no env-var resolution, no re-export shortcuts — if a package needs a public surface, callers import from the deeper module path (`from entities.bot.model import Bot`, not `from entities.bot import Bot`). Reason: `__init__.py` runs at import time and is easy to overlook as a code-search target; logic that lives there hides from readers, type-checkers (sometimes), and tests.

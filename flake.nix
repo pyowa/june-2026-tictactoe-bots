@@ -25,7 +25,6 @@
             # Kubernetes side.
             kind
             kubectl
-            kubernetes-helm
             k9s
 
             # Day-to-day utilities.

@@ -34,7 +34,6 @@ dev = [
     "httpx2",
     "ruff",
     "ty",
-    "poethepoet>=0.46.0",
     "pymarkdownlnt>=0.9",
     # Only the test conftest's admin-database bootstrap uses psycopg2 (sync
     # connection for CREATE DATABASE before the async machinery comes up).
@@ -45,95 +44,6 @@ dev = [
     # needed for dispatcher unit tests
     {include-group = "dispatcher"},
 ]
-
-[tool.poe.tasks]
-test         = "pytest"
-lint         = "ruff check ."
-lint-md      = "pymarkdown scan README.md TODO.md CLAUDE.md"
-format       = "ruff format ."
-typecheck    = "ty check web/ db/ entities/ runner/ messaging/ scripts/ tests/"
-seed-examples = "python -m scripts.seed_example_bots"
-reset-db     = "python -m scripts.reset_db"
-mutate       = "mutmut run"
-
-[tool.poe.tasks.check]
-sequence = ["lint", "lint-md", "typecheck", "test"]
-
-[tool.poe.tasks.acceptance]
-# Live-stack acceptance tests. Requires the compose broker and either the
-# compose worker or the kind dispatcher running.
-cmd = "pytest tests/acceptance/ -o addopts=--no-cov -v"
-
-[tool.poe.tasks.kind-up]
-# Create the kind cluster (idempotent — skips if already exists).
-shell = """
-nix develop --command sh -c '
-  kind get clusters 2>/dev/null | grep -q "^kind$" \
-    && echo "cluster already exists" \
-    || kind create cluster --config k8s/kind-cluster.yaml
-
-  helm repo add bitnami https://charts.bitnami.com/bitnami 2>/dev/null || true
-  helm repo update
-
-  kubectl apply -f k8s/platform/Namespace.yaml
-
-  helm upgrade --install postgres bitnami/postgresql \
-    -n platform -f k8s/platform/values/postgres.yaml
-  helm upgrade --install rabbitmq bitnami/rabbitmq \
-    -n platform -f k8s/platform/values/rabbitmq.yaml
-
-  echo "Waiting for postgres to be ready..."
-  kubectl rollout status statefulset/postgres-postgresql -n platform --timeout=180s
-  echo "Waiting for rabbitmq to be ready..."
-  kubectl rollout status deployment/rabbitmq -n platform --timeout=180s
-
-  kubectl apply -k k8s/platform/
-
-  kubectl create namespace bots --dry-run=client -o yaml | kubectl apply -f -
-  kubectl apply -f k8s/network-policy.yaml
-  kubectl apply -k k8s/dispatcher/
-  echo "Infrastructure ready. Run: uv run poe kind-load"
-'
-"""
-
-[tool.poe.tasks.kind-down]
-# Destroy the kind cluster.
-shell = "nix develop --command kind delete cluster"
-
-[tool.poe.tasks.build-images]
-# Build bot-runner images for all supported Python versions, the dispatcher, web, and match-scheduler.
-shell = """
-set -e
-for ver in 3.10 3.11 3.12 3.13 3.14; do
-  docker build -t pyowa/bot-runner-python:${ver} \
-    --build-arg PY_VERSION=${ver} \
-    bot-runner-images/python/
-done
-docker build -t pyowa/dispatcher:latest --target dispatcher .
-docker build -t pyowa/web:latest --target web .
-docker build -t pyowa/match-scheduler:latest --target match-scheduler .
-"""
-
-[tool.poe.tasks.kind-load]
-# Load locally built images into the kind cluster.
-shell = """
-set -e
-for ver in 3.10 3.11 3.12 3.13 3.14; do
-  nix develop --command kind load docker-image pyowa/bot-runner-python:${ver}
-done
-nix develop --command kind load docker-image pyowa/dispatcher:latest
-nix develop --command kind load docker-image pyowa/web:latest
-nix develop --command kind load docker-image pyowa/match-scheduler:latest
-"""
-
-[tool.poe.tasks.reload-web]
-# Rebuild the web image, load it into kind, and restart the deployment.
-shell = """
-set -e
-docker build -t pyowa/web:latest --target web .
-nix develop --command kind load docker-image pyowa/web:latest
-kubectl rollout restart deployment/web -n platform
-"""
 
 [tool.ruff]
 target-version = "py311"

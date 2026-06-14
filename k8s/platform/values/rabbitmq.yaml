@@ -1,8 +1,0 @@
-auth:
-  username: guest
-  password: guest
-service:
-  type: NodePort
-  nodePorts:
-    amqp: "30002"
-    manager: "30001"
