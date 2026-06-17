@@ -45,6 +45,11 @@ def test_pick_python_version_picks_higher_numerically() -> None:
     assert pick_python_version("3.13", "3.11") == "3.13"
 
 
+def test_pick_python_version_pins_direction_exactly() -> None:
+    # Mutating max→min would return "3.10" here — pin the exact winner.
+    assert pick_python_version("3.10", "3.12") == "3.12"
+
+
 def test_pick_python_version_treats_equal_versions_as_equal() -> None:
     assert pick_python_version("3", "3") == "3"
 
@@ -292,6 +297,29 @@ def test_make_queue_uses_configured_broker_url() -> None:
 
     queue = make_queue()
     assert queue._url == BROKER_URL
+
+
+def test_default_broker_url_literal() -> None:
+    from messaging.client import DEFAULT_BROKER_URL
+
+    assert DEFAULT_BROKER_URL == "amqp://guest:guest@localhost:5672/"
+
+
+def test_broker_url_reads_from_rabbitmq_url_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import importlib
+
+    import messaging.client as mc
+
+    custom = "amqp://user:pass@broker:5672/"
+    monkeypatch.setenv("RABBITMQ_URL", custom)
+    importlib.reload(mc)
+    try:
+        assert mc.BROKER_URL == custom
+    finally:
+        monkeypatch.delenv("RABBITMQ_URL", raising=False)
+        importlib.reload(mc)
 
 
 # ---------------------------------------------------------------------------

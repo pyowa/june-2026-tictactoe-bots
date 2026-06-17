@@ -818,6 +818,19 @@ def test_error_response_renders_index_page_successfully(client) -> None:
 # ---------------------------------------------------------------------------
 
 
+async def test_bot_family_draws_counts_cat_results(engine) -> None:
+    """family() draws subquery — Match.result == 'cat' can be mutated to None.
+    With None the WHERE clause matches nothing so draws is always 0; this test
+    pins it to 1 so the mutation is caught."""
+    bot = await db_insert_bot(engine, "DrawFam")
+    foe = await db_insert_bot(engine, "DrawFoe")
+    await db_insert_match(engine, bot, foe, winner_id=None, result="cat")
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        rows = await BotRepository(session).family("DrawFam")
+    assert rows[0].draws == 1
+
+
 async def test_match_detail_back_url_is_accessible_in_template(client, engine) -> None:
     """The 'back_url' context key must reach the template by its exact name.
     Renaming it to 'XXback_urlXX' or 'BACK_URL' renders href="" instead of

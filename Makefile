@@ -32,7 +32,7 @@ reset-db:
 	uv run python -m scripts.reset_db
 
 mutate:
-	uv run mutmut run
+	docker-compose --profile mutmut run --rm mutmut uv run mutmut run $(MODULE)
 
 acceptance:
 	uv run pytest tests/acceptance/ -o addopts=--no-cov -v

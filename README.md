@@ -309,6 +309,8 @@ Stack: FastAPI · SQLAlchemy 2.x (async, `asyncpg`) on Postgres · RabbitMQ (`ai
 | `make typecheck` | Type-check with ty |
 | `make check` | Run lint + lint-md + typecheck + test in sequence |
 | `make acceptance` | Live-stack acceptance tests against the running k8s stack. Opt-in — not part of `make check`. |
+| `make mutate` | Run mutation testing (full run) inside Docker. Requires kind cluster up. |
+| `make mutate MODULE=<pattern>` | Run mutations matching a glob pattern, e.g. `make mutate MODULE="entities.bot.repository*"` |
 | `make build-images` | Build all images: dispatcher, web, match-scheduler, and bot-runners (one per Python version) |
 | `make kind-load` | Load locally built images into the kind cluster |
 | `make kind-up` | Full stack bring-up: build images, create cluster, apply all manifests, wait for readiness, load images |
@@ -317,11 +319,12 @@ Stack: FastAPI · SQLAlchemy 2.x (async, `asyncpg`) on Postgres · RabbitMQ (`ai
 
 ### Mutation testing
 
-mutmut v3 hardcodes `os.fork()`, which segfaults on macOS + Python 3.14. Run it in Docker instead (requires the kind cluster to be running — mutmut connects to Postgres via `host.docker.internal`):
+mutmut v3 hardcodes `os.fork()`, which segfaults on macOS + Python 3.14. Use `make mutate` — it runs mutmut inside Docker (requires the kind cluster to be running):
 
 ```bash
-# Run mutations (slow — 30-60 min). Results are saved to mutants/**/*.meta.
-docker compose --profile mutmut run --rm mutmut
+make mutate                                        # full run across all paths_to_mutate (slow — 30-60 min)
+make mutate MODULE="entities.bot.repository*"      # target a single module
+make mutate MODULE="entities.bot.repository*get*"  # target specific functions within a module
 
 # After the run, inspect results locally:
 uv run mutmut results          # list all surviving mutants

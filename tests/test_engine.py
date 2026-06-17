@@ -54,6 +54,18 @@ def test_parse_board_rejects_z_symbol() -> None:
     assert parse_board("Z|.|.\n.|.|.\n.|.|.") is None
 
 
+def test_parse_board_accepts_all_x_row() -> None:
+    assert parse_board("X|X|X\n.|.|.\n.|.|.") is not None
+
+
+def test_parse_board_accepts_all_o_row() -> None:
+    assert parse_board("O|O|O\n.|.|.\n.|.|.") is not None
+
+
+def test_parse_board_accepts_all_dot_row() -> None:
+    assert parse_board(".|.|.\n.|.|.\n.|.|.") is not None
+
+
 def test_parse_board_strips_trailing_whitespace_and_newlines() -> None:
     """`text.strip().splitlines()` tolerates a trailing blank line (common
     when a subprocess prints with `print()` and emits an extra `\\n`).

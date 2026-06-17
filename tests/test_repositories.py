@@ -17,7 +17,7 @@ from entities.bot.repository import BotRepository
 from entities.match.model import Match
 from entities.match.repository import MatchRepository
 from runner.engine import MatchResult, Move
-from tests.conftest import TEST_ASYNC_URL, db_insert_bot
+from tests.conftest import TEST_ASYNC_URL, db_insert_bot, db_insert_match
 
 
 @pytest_asyncio.fixture()
@@ -183,3 +183,106 @@ async def test_match_record_persists_draw(
         row = (await session.execute(select(Match))).scalar_one()
     assert row.result == "cat"
     assert row.winner_id is None
+
+
+# ---------------------------------------------------------------------------
+# BotRepository.create — default python_version
+# ---------------------------------------------------------------------------
+
+
+async def test_bot_create_default_python_version(
+    engine: AsyncEngine, _bound_db: None
+) -> None:
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        bot = await BotRepository(session).create(
+            base_name="DefaultPy",
+            versioned_name="DefaultPy",
+            version=1,
+            owner_token="tok",
+        )
+        await session.commit()
+    async with factory() as session:
+        found = await BotRepository(session).by_id(bot.id)
+    assert found is not None
+    assert found.python_version == "3"
+
+
+# ---------------------------------------------------------------------------
+# MatchRepository.list_all — ordering
+# ---------------------------------------------------------------------------
+
+
+async def test_list_all_orders_by_played_at_desc(
+    engine: AsyncEngine, _bound_db: None
+) -> None:
+    bot_a = await db_insert_bot(engine, "OrdA")
+    bot_b = await db_insert_bot(engine, "OrdB")
+    await db_insert_match(engine, bot_a, bot_b, None, "cat", "2024-01-01T10:00:00")
+    await db_insert_match(engine, bot_a, bot_b, None, "cat", "2024-01-02T10:00:00")
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        rows = await MatchRepository(session).list_all()
+    assert rows[0].played_at > rows[1].played_at
+
+
+# ---------------------------------------------------------------------------
+# MatchRepository.list_for_bot — X/O sides and ordering
+# ---------------------------------------------------------------------------
+
+
+async def test_list_for_bot_includes_match_as_x(
+    engine: AsyncEngine, _bound_db: None
+) -> None:
+    hero = await db_insert_bot(engine, "Hero")
+    foe = await db_insert_bot(engine, "Foe")
+    await db_insert_match(engine, hero, foe, None, "cat")
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        rows = await MatchRepository(session).list_for_bot("Hero")
+    assert len(rows) == 1
+    assert rows[0].bot_x == "Hero"
+
+
+async def test_list_for_bot_includes_match_as_o(
+    engine: AsyncEngine, _bound_db: None
+) -> None:
+    hero = await db_insert_bot(engine, "HeroO")
+    foe = await db_insert_bot(engine, "FoeO")
+    await db_insert_match(engine, foe, hero, None, "cat")
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        rows = await MatchRepository(session).list_for_bot("HeroO")
+    assert len(rows) == 1
+    assert rows[0].bot_o == "HeroO"
+
+
+async def test_list_for_bot_orders_by_played_at_desc(
+    engine: AsyncEngine, _bound_db: None
+) -> None:
+    bot_a = await db_insert_bot(engine, "ForBotA")
+    bot_b = await db_insert_bot(engine, "ForBotB")
+    await db_insert_match(engine, bot_a, bot_b, None, "cat", "2024-03-01T00:00:00")
+    await db_insert_match(engine, bot_a, bot_b, None, "cat", "2024-03-02T00:00:00")
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        rows = await MatchRepository(session).list_for_bot("ForBotA")
+    assert rows[0].played_at > rows[1].played_at
+
+
+# ---------------------------------------------------------------------------
+# BotRepository.family — ordering
+# ---------------------------------------------------------------------------
+
+
+async def test_family_returns_versions_newest_first(
+    engine: AsyncEngine, _bound_db: None
+) -> None:
+    await db_insert_bot(engine, "Fam", version=1, versioned_name="Fam")
+    await db_insert_bot(engine, "Fam", version=2, versioned_name="FamV2")
+    await db_insert_bot(engine, "Fam", version=3, versioned_name="FamV3")
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        rows = await BotRepository(session).family("Fam")
+    versions = [r.version for r in rows]
+    assert versions == sorted(versions, reverse=True)
