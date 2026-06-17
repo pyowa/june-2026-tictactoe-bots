@@ -13,9 +13,47 @@
 
     <p>Upload a <code>.py</code> file. Your bot must begin with a docstring containing a <code>name:</code> field. Optionally specify a Python version (defaults to <code>3</code>):</p>
     <pre><code>"""
-name: My Awesome Bot
+name: Example Bot
 python: 3.11
-"""</code></pre>
+"""
+
+import sys
+
+
+def read_board() -> tuple[str, list[list[str]]]:
+    """
+    Input:
+        X
+        X|.|.
+        .|O|.
+        .|.|.
+    Output:
+        (
+            'X',
+            [
+                ['X', '.', '.'],
+                ['.', 'O', '.'],
+                ['.', '.', '.'],
+            ]
+        )
+    """
+    data = sys.stdin.read().strip().splitlines()
+    symbol = data[0]
+    return symbol, [row.split("|") for row in data[1:]]
+
+
+def write_board(board: list[list[str]]) -> None:
+    for r in board:
+        print("|".join(r))
+
+
+if __name__ == "__main__":
+    symbol, board = read_board()
+    print(f"Starting {symbol}", file=sys.stderr)
+    write_board(board)
+    print(f"Ending {symbol}", file=sys.stderr)
+    </code></pre>
+
 
     <form method="post" action="/submit" enctype="multipart/form-data">
         <label for="file">Bot script (.py)</label>

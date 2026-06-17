@@ -55,7 +55,7 @@ Forfeit wins are tracked separately from clean wins on the leaderboard.
 
 ```python
 """
-name: Top-Left Bot
+name: Example Bot
 """
 import sys
 
