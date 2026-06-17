@@ -197,6 +197,8 @@ These three mutations survive because the protected code is either logically dea
 
 ### Phase 3 — Operational polish
 
+- [ ] **Visual regression testing** — add Playwright (Python) to `pyproject.toml` and wire browser binaries via the Nix flake (`playwright-driver` from nixpkgs + `PLAYWRIGHT_BROWSERS_PATH` in `shellHook`). Write screenshot tests against the kind-hosted web service (port 30000) covering the submit page (syntax highlighting, Fira Code font, Pyowa styling) and leaderboard. Run as part of `make acceptance`. Deferred until after the group meeting (2026-06-23) when the UI has settled.
+
 - [ ] **CI/CD** — GitHub Actions: build → push to ACR → `az containerapp update`. Separate workflows for web and runner.
 - [ ] **Observability** — wire `opentelemetry-instrumentation-fastapi`, ship traces/logs to App Insights. Add a dashboard for queue depth + match duration.
 - [ ] **Bot sandboxing review** — the job container itself is the sandbox, but confirm CPU/memory limits in the job spec, set `read-only` root filesystem where possible, and drop network egress for bot subprocesses.

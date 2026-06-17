@@ -1,8 +1,8 @@
 """initial schema
 
-Revision ID: c19b6e2bf955
+Revision ID: c6ce93889b8c
 Revises: 
-Create Date: 2026-06-03 09:52:06.949070
+Create Date: 2026-06-16 23:36:34.723888
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'c19b6e2bf955'
+revision: str = 'c6ce93889b8c'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -27,9 +27,12 @@ def upgrade() -> None:
     sa.Column('versioned_name', sa.String(), nullable=False),
     sa.Column('version', sa.Integer(), server_default='1', nullable=False),
     sa.Column('owner_token', sa.String(), nullable=False),
-    sa.Column('file_path', sa.String(), nullable=False),
+    sa.Column('source', sa.LargeBinary(), nullable=True),
     sa.Column('python_version', sa.String(), server_default='3', nullable=False),
-    sa.Column('submitted_at', sa.DateTime(), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
+    sa.Column('runtime_key', sa.String(), server_default='python-3.14', nullable=False),
+    sa.Column('pod_name', sa.String(), nullable=True),
+    sa.Column('pod_ready', sa.Boolean(), server_default='false', nullable=False),
+    sa.Column('submitted_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=False),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('versioned_name')
     )
@@ -39,7 +42,8 @@ def upgrade() -> None:
     sa.Column('bot_o_id', sa.Integer(), nullable=False),
     sa.Column('winner_id', sa.Integer(), nullable=True),
     sa.Column('result', sa.String(), nullable=False),
-    sa.Column('played_at', sa.DateTime(), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
+    sa.Column('correlation_id', sa.String(), nullable=True),
+    sa.Column('played_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=False),
     sa.CheckConstraint("result IN ('x_wins', 'o_wins', 'cat', 'x_forfeit', 'o_forfeit')", name='ck_matches_result'),
     sa.ForeignKeyConstraint(['bot_o_id'], ['bots.id'], ),
     sa.ForeignKeyConstraint(['bot_x_id'], ['bots.id'], ),
