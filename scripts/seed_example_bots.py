@@ -32,6 +32,7 @@ ROOT = Path(__file__).parent.parent
 EXAMPLE_BOTS_DIR = ROOT / "example_bots"
 
 
+# TODO smell
 async def main() -> None:
     async with get_session() as session:
         print("Clearing existing bots, matches, and moves...")

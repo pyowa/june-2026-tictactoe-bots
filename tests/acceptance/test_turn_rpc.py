@@ -9,6 +9,7 @@ import pytest
 pytestmark = pytest.mark.acceptance
 
 
+# TODO smell
 @pytest.mark.skip(
     reason="Old RPC architecture removed; new pipeline acceptance tests TBD"
 )

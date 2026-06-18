@@ -26,6 +26,7 @@
             kind
             kubectl
             k9s
+            kubeconform
 
             # Day-to-day utilities.
             jq

@@ -15,7 +15,7 @@ def pick_runtime_key(a: str, b: str) -> str:
 
     ta, tb = python_tuple(a), python_tuple(b)
     if ta and tb:
-        return a if ta >= tb else b
+        return a if ta >= tb else b  # pragma: no mutate -- >= vs > equivalent
     return a
 
 

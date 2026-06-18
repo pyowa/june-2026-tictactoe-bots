@@ -11,6 +11,7 @@ import aio_pika
 from aio_pika.abc import AbstractChannel, AbstractIncomingMessage
 
 
+# TODO smell
 async def serve_rpc(  # pragma: no cover
     channel: AbstractChannel,
     queue_name: str,

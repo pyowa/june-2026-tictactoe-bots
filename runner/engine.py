@@ -40,6 +40,7 @@ def board_to_str(board: Board) -> str:
     return "\n".join("|".join(row) for row in board)
 
 
+# TODO smell
 def check_winner(board: Board) -> str | None:
     for line in WINNING_LINES:
         values = [board[r][c] for r, c in line]
@@ -52,6 +53,7 @@ def check_winner(board: Board) -> str | None:
     return None
 
 
+# TODO smell
 def validate_move(old_board: Board, new_board: Board, symbol: str) -> str | None:
     changes = [
         (r, c, old_board[r][c], new_board[r][c])

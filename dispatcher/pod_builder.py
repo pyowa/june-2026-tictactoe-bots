@@ -51,6 +51,7 @@ def _build_pod_and_wait(
     wait_for_http_ready(pod_ip, timeout=timeout)
 
 
+# TODO smell
 async def handle_build_pod_message(
     message: Any,
     channel: Any,

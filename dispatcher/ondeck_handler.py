@@ -20,6 +20,7 @@ from messaging.contracts import MATCH_ONDECK_QUEUE, MatchOndeck
 _log = structlog.get_logger()
 
 
+# TODO smell
 async def handle_match_ondeck(
     message: Any,
     channel: Any,

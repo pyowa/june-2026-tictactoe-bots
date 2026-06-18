@@ -25,7 +25,7 @@ class MoveRepository:
                 Move.error,
                 Bot.versioned_name.label("bot_name"),
             )
-            .join(Bot, Move.bot_id == Bot.id)  # pragma: no mutate
+            .join(Bot)
             .where(Move.match_id == match_id)
             .order_by(Move.move_number)
         )

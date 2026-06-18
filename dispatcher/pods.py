@@ -77,6 +77,7 @@ def wait_for_http_ready(
     raise TimeoutError(f"pod at {pod_ip} not ready after {timeout}s")
 
 
+# TODO smell
 def wait_for_pod_ready(
     core_v1: Any,
     pod_name: str,

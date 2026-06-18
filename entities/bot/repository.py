@@ -69,8 +69,8 @@ class BotRepository:
         versioned_name: str,
         version: int,
         owner_token: str,
-        python_version: str = "3",
-        runtime_key: str = "python-3.14",
+        python_version: str = "3",  # pragma: no mutate -- trampoline
+        runtime_key: str = "python-3.14",  # pragma: no mutate -- trampoline
         source: bytes | None = None,
     ) -> Bot:
         """Insert a new bot row. Flushes so `bot.id` is populated; the caller
@@ -101,6 +101,7 @@ class BotRepository:
             bot.pod_name = pod_name
             await self._session.commit()
 
+    # TODO smell
     async def leaderboard(self) -> list[Row[Any]]:
         # Mirror the original raw SQL's structure exactly: two CTEs (latest-version
         # per family, then the actual latest-bot row) feeding six correlated COUNT
@@ -114,7 +115,7 @@ class BotRepository:
                 func.max(Bot.version).label("max_v"),
             )
             .group_by(Bot.base_name)
-            .cte("latest_per_family")
+            .cte()
         )
 
         latest_bot = (
@@ -131,7 +132,7 @@ class BotRepository:
                     latest_per_family.c.max_v == Bot.version,
                 ),
             )
-            .cte("latest_bot")
+            .cte()
         )
 
         lb_id = latest_bot.c.id
@@ -209,9 +210,9 @@ class BotRepository:
         # `SELECT FROM latest_bot`), and SQLAlchemy will only auto-correlate one
         # level up. Without the explicit correlate, `latest_bot` would be added
         # to the inner FROM clause and the NOT EXISTS would be uncorrelated.
-        bw_inner = aliased(Bot, name="bw_inner")
+        bw_inner = aliased(Bot, name="bw_inner")  # pragma: no mutate -- alias cosmetic
         winner_not_in_family = ~(
-            select(1)
+            select(1)  # pragma: no mutate -- EXISTS ignores the selected value
             .select_from(bw_inner)
             .where(
                 bw_inner.id == Match.winner_id,
@@ -259,6 +260,7 @@ class BotRepository:
         result = await self._session.execute(stmt)
         return list(result.all())
 
+    # TODO smell
     async def family(self, base_name: str) -> list[Row[Any]]:
         # Four correlated COUNT(*) subqueries — one per per-version stat we
         # need for the bot-family detail page. Each one filters `matches`

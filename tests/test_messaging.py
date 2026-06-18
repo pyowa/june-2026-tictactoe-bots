@@ -373,10 +373,7 @@ async def test_ensure_connected_opens_connection_when_none() -> None:
     from messaging.contracts import BUILD_POD_QUEUE
 
     mock_connect.assert_awaited_once_with("amqp://test")
-    declared = [
-        call.args for call in mock_channel.declare_queue.await_args_list
-    ]
-    assert (BUILD_POD_QUEUE,) in declared
+    mock_channel.declare_queue.assert_awaited_once_with(BUILD_POD_QUEUE, durable=True)
     assert channel is mock_channel
     assert queue._connection is mock_connection
 

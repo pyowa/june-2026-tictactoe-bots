@@ -46,7 +46,10 @@ class RpcClient:
                 future.set_result(message.body)
 
     async def call(
-        self, target_queue: str, payload: bytes, timeout: float = 10.0
+        self,
+        target_queue: str,
+        payload: bytes,
+        timeout: float = 10.0,  # pragma: no mutate -- trampoline masks defaults
     ) -> bytes:
         correlation_id = uuid.uuid4().hex
         loop = asyncio.get_running_loop()

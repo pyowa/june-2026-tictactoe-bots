@@ -66,6 +66,7 @@ def _http_error(code: int) -> urllib.error.HTTPError:
     )
 
 
+# TODO smell - things like this need their own file?
 # ---------------------------------------------------------------------------
 # purge_rabbitmq_queues
 # ---------------------------------------------------------------------------

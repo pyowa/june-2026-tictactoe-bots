@@ -48,7 +48,7 @@ async def test_handle_match_ondeck_happy_path_records_result() -> None:
 
     fake_result = MatchResult("x_wins", [])
 
-    with (
+    with ( #TODO smell
         patch(
             "dispatcher.ondeck_handler.get_session",
             side_effect=[_make_session_ctx(), _make_session_ctx()],
@@ -93,7 +93,7 @@ async def test_handle_match_ondeck_happy_path_match_result_passed_to_record() ->
 
     fake_result = MatchResult("o_wins", [])
 
-    with (
+    with ( # TODO smell
         patch(
             "dispatcher.ondeck_handler.get_session",
             side_effect=[_make_session_ctx(), _make_session_ctx()],
@@ -199,7 +199,7 @@ async def test_handle_match_ondeck_bot_has_no_pod_name_acks_silently() -> None:
     match_repo_instance = MagicMock()
     match_repo_instance.record = AsyncMock()
 
-    with (
+    with (# TODO smell
         patch(
             "dispatcher.ondeck_handler.get_session",
             return_value=_make_session_ctx(),

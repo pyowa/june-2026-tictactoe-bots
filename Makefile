@@ -2,7 +2,7 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := check
 
-.PHONY: test lint lint-md format typecheck check \
+.PHONY: test lint lint-md lint-k8s format typecheck check \
         seed-examples reset-db mutate acceptance \
         kind-up kind-down build-images kind-load reload-web
 
@@ -17,13 +17,18 @@ lint:
 lint-md:
 	uv run pymarkdown scan README.md TODO.md CLAUDE.md
 
+lint-k8s:
+	@command -v kubeconform >/dev/null 2>&1 \
+	  && kubeconform -strict -summary k8s/ \
+	  || echo "kubeconform not found — skipping k8s lint (install via: nix develop or brew install kubeconform)"
+
 format:
 	uv run ruff format .
 
 typecheck:
 	uv run ty check web/ db/ entities/ runner/ messaging/ scripts/ tests/
 
-check: lint lint-md typecheck test
+check: lint lint-md lint-k8s typecheck test
 
 seed-examples:
 	uv run python -m scripts.seed_example_bots

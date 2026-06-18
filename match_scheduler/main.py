@@ -25,6 +25,7 @@ from messaging.contracts import (
 _log = structlog.get_logger()
 
 
+# TODO smell
 async def handle_pod_ready_message(message: Any, channel: Any) -> None:
     async with message.process():
         try:

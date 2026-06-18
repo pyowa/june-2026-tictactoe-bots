@@ -31,6 +31,7 @@ def _forfeit_label(player: str) -> str:
     return "x_forfeit" if player == "x" else "o_forfeit"
 
 
+# TODO: smell
 def run_match_from_pods(
     core_v1: Any,
     pod_name_x: str,

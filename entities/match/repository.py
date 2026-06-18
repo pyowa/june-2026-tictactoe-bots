@@ -80,6 +80,7 @@ class MatchRepository:
         result = await self._session.execute(stmt)
         return list(result.all())
 
+    # TODO smell
     async def record(
         self, bot_x_id: int, bot_o_id: int, result: MatchResult, correlation_id: str
     ) -> None:
