@@ -6,6 +6,7 @@ from dispatcher.match_runner import (
     _forfeit_label,
     run_match_from_pods,
 )
+from runner.engine import MatchOutcome
 
 # ---------------------------------------------------------------------------
 # _forfeit_label — pure function
@@ -13,11 +14,11 @@ from dispatcher.match_runner import (
 
 
 def test_forfeit_label_x() -> None:
-    assert _forfeit_label("x") == "x_forfeit"
+    assert _forfeit_label("x") == MatchOutcome.X_FORFEIT
 
 
 def test_forfeit_label_o() -> None:
-    assert _forfeit_label("o") == "o_forfeit"
+    assert _forfeit_label("o") == MatchOutcome.O_FORFEIT
 
 
 # ---------------------------------------------------------------------------
@@ -64,7 +65,7 @@ def test_run_match_from_pods_x_wins() -> None:
     ]
     with _patch_pods_from_names(turns):
         result = run_match_from_pods(core_v1, "pod-x", "pod-o", "cid-fp-x")
-    assert result.result == "x_wins"
+    assert result.result == MatchOutcome.X_WINS
     assert len(result.moves) == 5
 
 
@@ -82,7 +83,7 @@ def test_run_match_from_pods_o_wins() -> None:
     ]
     with _patch_pods_from_names(turns):
         result = run_match_from_pods(core_v1, "pod-x", "pod-o", "cid-fp-o")
-    assert result.result == "o_wins"
+    assert result.result == MatchOutcome.O_WINS
 
 
 def test_run_match_from_pods_draw() -> None:
@@ -101,7 +102,7 @@ def test_run_match_from_pods_draw() -> None:
     turns = [{"board": b} for b in boards]
     with _patch_pods_from_names(turns):
         result = run_match_from_pods(core_v1, "pod-x", "pod-o", "cid-fp-draw")
-    assert result.result == "cat"
+    assert result.result == MatchOutcome.CAT
     assert len(result.moves) == 9
 
 
@@ -112,7 +113,7 @@ def test_run_match_from_pods_x_forfeits_on_http_error() -> None:
     turns = [URLError("connection refused")]
     with _patch_pods_from_names(turns):
         result = run_match_from_pods(core_v1, "pod-x", "pod-o", "cid-fp-xe")
-    assert result.result == "x_forfeit"
+    assert result.result == MatchOutcome.X_FORFEIT
     assert result.moves[-1].error is not None
 
 
@@ -124,7 +125,7 @@ def test_run_match_from_pods_o_forfeits_on_invalid_board() -> None:
     ]
     with _patch_pods_from_names(turns):
         result = run_match_from_pods(core_v1, "pod-x", "pod-o", "cid-fp-oe")
-    assert result.result == "o_forfeit"
+    assert result.result == MatchOutcome.O_FORFEIT
     assert "unparseable" in (result.moves[-1].error or "")
 
 

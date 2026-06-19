@@ -44,7 +44,7 @@ def extract_bot_name(source: str) -> str | None:
     for line in docstring.splitlines():
         stripped = line.strip()
         if stripped.lower().startswith("name:"):
-            name = stripped[5:].strip()
+            name = stripped[len("name:"):].strip()
             return name if name else None
 
     return None
@@ -79,9 +79,9 @@ def extract_runtime_key(source: str) -> str | None:
     for line in docstring.splitlines():
         stripped = line.strip()
         if stripped.lower().startswith("language:"):
-            language_key = stripped[9:].strip()
+            language_key = stripped[len("language:"):].strip()
         elif stripped.lower().startswith("python:"):
-            python_ver = stripped[7:].strip()
+            python_ver = stripped[len("python:"):].strip()
 
     if language_key is not None:
         return language_key if language_key in RUNTIMES else None

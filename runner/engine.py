@@ -5,9 +5,18 @@ drive matches, and could be reused by anything else that needs to reason
 about board state.
 """
 
+import enum
 from dataclasses import dataclass, field
 
 Board = list[list[str]]
+
+
+class MatchOutcome(str, enum.Enum):
+    X_WINS = "x_wins"
+    O_WINS = "o_wins"
+    X_FORFEIT = "x_forfeit"
+    O_FORFEIT = "o_forfeit"
+    CAT = "cat"
 
 EMPTY_BOARD: Board = [[".", ".", "."], [".", ".", "."], [".", ".", "."]]
 
@@ -40,15 +49,15 @@ def board_to_str(board: Board) -> str:
     return "\n".join("|".join(row) for row in board)
 
 
-def check_winner(board: Board) -> str | None:
+def check_winner(board: Board) -> MatchOutcome | None:
     for line in WINNING_LINES:
         values = [board[r][c] for r, c in line]
         if values == ["X", "X", "X"]:
-            return "x_wins"
+            return MatchOutcome.X_WINS
         if values == ["O", "O", "O"]:
-            return "o_wins"
+            return MatchOutcome.O_WINS
     if all(board[r][c] != "." for r in range(3) for c in range(3)):
-        return "cat"
+        return MatchOutcome.CAT
     return None
 
 
@@ -81,5 +90,5 @@ class Move:
 
 @dataclass
 class MatchResult:
-    result: str
+    result: MatchOutcome
     moves: list[Move] = field(default_factory=list)

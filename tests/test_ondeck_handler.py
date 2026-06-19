@@ -6,7 +6,7 @@ import aio_pika
 
 from dispatcher.ondeck_handler import handle_match_ondeck
 from messaging.contracts import MatchOndeck
-from runner.engine import MatchResult
+from runner.engine import MatchOutcome, MatchResult
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -57,7 +57,7 @@ async def test_handle_match_ondeck_happy_path_records_result() -> None:
     match_repo_instance = MagicMock()
     match_repo_instance.record = AsyncMock()
 
-    fake_result = MatchResult("x_wins", [])
+    fake_result = MatchResult(MatchOutcome.X_WINS, [])
 
     with (
         patch(
@@ -102,7 +102,7 @@ async def test_handle_match_ondeck_happy_path_match_result_passed_to_record() ->
     match_repo_instance = MagicMock()
     match_repo_instance.record = AsyncMock()
 
-    fake_result = MatchResult("o_wins", [])
+    fake_result = MatchResult(MatchOutcome.O_WINS, [])
 
     with (
         patch(

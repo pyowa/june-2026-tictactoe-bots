@@ -2,6 +2,7 @@ import pytest
 
 from runner.engine import (
     Board,
+    MatchOutcome,
     board_to_str,
     check_winner,
     parse_board,
@@ -81,28 +82,28 @@ def test_board_to_str_roundtrips() -> None:
 @pytest.mark.parametrize(
     "board_text,expected",
     [
-        ("X|X|X\n.|.|.\n.|.|.", "x_wins"),
-        (".|.|.\nX|X|X\n.|.|.", "x_wins"),
-        (".|.|.\n.|.|.\nX|X|X", "x_wins"),
-        ("O|O|O\n.|.|.\n.|.|.", "o_wins"),
-        (".|.|.\nO|O|O\n.|.|.", "o_wins"),
-        (".|.|.\n.|.|.\nO|O|O", "o_wins"),
-        ("X|.|.\nX|.|.\nX|.|.", "x_wins"),
-        (".|X|.\n.|X|.\n.|X|.", "x_wins"),
-        (".|.|X\n.|.|X\n.|.|X", "x_wins"),
-        ("O|.|.\nO|.|.\nO|.|.", "o_wins"),
-        (".|O|.\n.|O|.\n.|O|.", "o_wins"),
-        (".|.|O\n.|.|O\n.|.|O", "o_wins"),
-        ("X|.|.\n.|X|.\n.|.|X", "x_wins"),
-        (".|.|X\n.|X|.\nX|.|.", "x_wins"),
-        ("O|.|.\n.|O|.\n.|.|O", "o_wins"),
-        (".|.|O\n.|O|.\nO|.|.", "o_wins"),
-        ("X|O|X\nO|O|X\nX|X|O", "cat"),
+        ("X|X|X\n.|.|.\n.|.|.", MatchOutcome.X_WINS),
+        (".|.|.\nX|X|X\n.|.|.", MatchOutcome.X_WINS),
+        (".|.|.\n.|.|.\nX|X|X", MatchOutcome.X_WINS),
+        ("O|O|O\n.|.|.\n.|.|.", MatchOutcome.O_WINS),
+        (".|.|.\nO|O|O\n.|.|.", MatchOutcome.O_WINS),
+        (".|.|.\n.|.|.\nO|O|O", MatchOutcome.O_WINS),
+        ("X|.|.\nX|.|.\nX|.|.", MatchOutcome.X_WINS),
+        (".|X|.\n.|X|.\n.|X|.", MatchOutcome.X_WINS),
+        (".|.|X\n.|.|X\n.|.|X", MatchOutcome.X_WINS),
+        ("O|.|.\nO|.|.\nO|.|.", MatchOutcome.O_WINS),
+        (".|O|.\n.|O|.\n.|O|.", MatchOutcome.O_WINS),
+        (".|.|O\n.|.|O\n.|.|O", MatchOutcome.O_WINS),
+        ("X|.|.\n.|X|.\n.|.|X", MatchOutcome.X_WINS),
+        (".|.|X\n.|X|.\nX|.|.", MatchOutcome.X_WINS),
+        ("O|.|.\n.|O|.\n.|.|O", MatchOutcome.O_WINS),
+        (".|.|O\n.|O|.\nO|.|.", MatchOutcome.O_WINS),
+        ("X|O|X\nO|O|X\nX|X|O", MatchOutcome.CAT),
         ("X|.|.\n.|.|.\n.|.|.", None),
         (EMPTY, None),
     ],
 )
-def test_check_winner(board_text: str, expected: str | None) -> None:
+def test_check_winner(board_text: str, expected: MatchOutcome | None) -> None:
     assert check_winner(b(board_text)) == expected
 
 

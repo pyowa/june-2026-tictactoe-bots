@@ -13,6 +13,7 @@ from urllib.request import Request, urlopen
 NAMESPACE = "bots"
 TURN_PORT = 8080
 _POLL_INTERVAL = 0.5
+_TERMINAL_POD_PHASES = frozenset({"Failed", "Unknown"})
 
 
 
@@ -93,7 +94,7 @@ def wait_for_pod_ready(
     while time.monotonic() < deadline:
         pod = core_v1.read_namespaced_pod(pod_name, NAMESPACE)
         phase = pod.status.phase
-        if phase in ("Failed", "Unknown"):
+        if phase in _TERMINAL_POD_PHASES:
             raise RuntimeError(f"pod {pod_name} entered phase {phase!r}")
         container_statuses = pod.status.container_statuses
         if (

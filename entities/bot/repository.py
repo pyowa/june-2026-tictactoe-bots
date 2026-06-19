@@ -11,6 +11,7 @@ from sqlalchemy.orm import aliased, undefer
 
 from entities.bot.model import Bot
 from entities.match.model import Match
+from runner.engine import MatchOutcome
 
 
 class BotRepository:
@@ -134,16 +135,16 @@ class BotRepository:
             .cte("latest_bot")
         )
 
-        lb_id = latest_bot.c.id
-        lb_base = latest_bot.c.base_name
+        latest_id = latest_bot.c.id
+        latest_base = latest_bot.c.base_name
 
         # Per-version stats (only the latest version of this family).
         clean_wins = (
             select(func.count())
             .select_from(Match)
             .where(
-                Match.winner_id == lb_id,
-                Match.result.in_(("x_wins", "o_wins")),
+                Match.winner_id == latest_id,
+                Match.result.in_((MatchOutcome.X_WINS, MatchOutcome.O_WINS)),
             )
             .scalar_subquery()
         )
@@ -151,8 +152,8 @@ class BotRepository:
             select(func.count())
             .select_from(Match)
             .where(
-                Match.winner_id == lb_id,
-                Match.result.in_(("x_forfeit", "o_forfeit")),
+                Match.winner_id == latest_id,
+                Match.result.in_((MatchOutcome.X_FORFEIT, MatchOutcome.O_FORFEIT)),
             )
             .scalar_subquery()
         )
@@ -160,8 +161,8 @@ class BotRepository:
             select(func.count())
             .select_from(Match)
             .where(
-                or_(Match.bot_x_id == lb_id, Match.bot_o_id == lb_id),
-                Match.result == "cat",
+                or_(Match.bot_x_id == latest_id, Match.bot_o_id == latest_id),
+                Match.result == MatchOutcome.CAT,
             )
             .scalar_subquery()
         )
@@ -169,9 +170,9 @@ class BotRepository:
             select(func.count())
             .select_from(Match)
             .where(
-                or_(Match.bot_x_id == lb_id, Match.bot_o_id == lb_id),
-                Match.result != "cat",
-                or_(Match.winner_id.is_(None), Match.winner_id != lb_id),
+                or_(Match.bot_x_id == latest_id, Match.bot_o_id == latest_id),
+                Match.result != MatchOutcome.CAT,
+                or_(Match.winner_id.is_(None), Match.winner_id != latest_id),
             )
             .scalar_subquery()
         )
@@ -191,8 +192,8 @@ class BotRepository:
             .join(bo, bo.id == Match.bot_o_id)
             .join(bw, bw.id == Match.winner_id)
             .where(
-                bw.base_name == lb_base,
-                or_(bx.base_name != lb_base, bo.base_name != lb_base),
+                bw.base_name == latest_base,
+                or_(bx.base_name != latest_base, bo.base_name != latest_base),
             )
             .scalar_subquery()
         )
@@ -211,7 +212,7 @@ class BotRepository:
             .select_from(bw_inner)
             .where(
                 bw_inner.id == Match.winner_id,
-                bw_inner.base_name == lb_base,
+                bw_inner.base_name == latest_base,
             )
             .correlate(latest_bot, Match)
             .exists()
@@ -223,9 +224,9 @@ class BotRepository:
             .join(bx, bx.id == Match.bot_x_id)
             .join(bo, bo.id == Match.bot_o_id)
             .where(
-                Match.result != "cat",
-                or_(bx.base_name == lb_base, bo.base_name == lb_base),
-                or_(bx.base_name != lb_base, bo.base_name != lb_base),
+                Match.result != MatchOutcome.CAT,
+                or_(bx.base_name == latest_base, bo.base_name == latest_base),
+                or_(bx.base_name != latest_base, bo.base_name != latest_base),
                 or_(Match.winner_id.is_(None), winner_not_in_family),
             )
             .scalar_subquery()
@@ -266,7 +267,7 @@ class BotRepository:
             .select_from(Match)
             .where(
                 Match.winner_id == Bot.id,
-                Match.result.in_(("x_wins", "o_wins")),
+                Match.result.in_((MatchOutcome.X_WINS, MatchOutcome.O_WINS)),
             )
             .scalar_subquery()
         )
@@ -275,7 +276,7 @@ class BotRepository:
             .select_from(Match)
             .where(
                 Match.winner_id == Bot.id,
-                Match.result.in_(("x_forfeit", "o_forfeit")),
+                Match.result.in_((MatchOutcome.X_FORFEIT, MatchOutcome.O_FORFEIT)),
             )
             .scalar_subquery()
         )
@@ -284,7 +285,7 @@ class BotRepository:
             .select_from(Match)
             .where(
                 or_(Match.bot_x_id == Bot.id, Match.bot_o_id == Bot.id),
-                Match.result == "cat",
+                Match.result == MatchOutcome.CAT,
             )
             .scalar_subquery()
         )
@@ -293,7 +294,7 @@ class BotRepository:
             .select_from(Match)
             .where(
                 or_(Match.bot_x_id == Bot.id, Match.bot_o_id == Bot.id),
-                Match.result != "cat",
+                Match.result != MatchOutcome.CAT,
                 or_(Match.winner_id.is_(None), Match.winner_id != Bot.id),
             )
             .scalar_subquery()

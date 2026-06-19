@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from entities.bot.model import Bot
 from entities.match.model import Match
 from entities.move.model import Move
-from runner.engine import MatchResult
+from runner.engine import MatchOutcome, MatchResult
 
 
 def _match_select() -> Any:
@@ -83,9 +83,9 @@ class MatchRepository:
         self, bot_x_id: int, bot_o_id: int, result: MatchResult, correlation_id: str
     ) -> None:
         """Persist a completed match and its moves."""
-        if result.result in ("x_wins", "o_forfeit"):
+        if result.result in (MatchOutcome.X_WINS, MatchOutcome.O_FORFEIT):
             winner_id: int | None = bot_x_id
-        elif result.result in ("o_wins", "x_forfeit"):
+        elif result.result in (MatchOutcome.O_WINS, MatchOutcome.X_FORFEIT):
             winner_id = bot_o_id
         else:
             winner_id = None

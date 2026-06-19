@@ -16,7 +16,7 @@ import db.session
 from entities.bot.repository import BotRepository
 from entities.match.model import Match
 from entities.match.repository import MatchRepository
-from runner.engine import MatchResult, Move
+from runner.engine import MatchOutcome, MatchResult, Move
 from tests.conftest import TEST_ASYNC_URL, db_insert_bot
 
 
@@ -142,14 +142,14 @@ async def test_match_record_persists_win(
     bot_o = await db_insert_bot(engine, "BotO")
     factory = async_sessionmaker(engine, expire_on_commit=False)
     result = MatchResult(
-        result="x_wins",
+        result=MatchOutcome.X_WINS,
         moves=[Move(1, "x", "X|.|.\n.|.|.\n.|.|.")],
     )
     async with factory() as session:
         await MatchRepository(session).record(bot_x, bot_o, result, "cid-123")
     async with factory() as session:
         row = (await session.execute(select(Match))).scalar_one()
-    assert row.result == "x_wins"
+    assert row.result == MatchOutcome.X_WINS
     assert row.winner_id == bot_x
     assert row.bot_x_id == bot_x
     assert row.bot_o_id == bot_o
@@ -161,12 +161,12 @@ async def test_match_record_persists_o_wins(
     bot_x = await db_insert_bot(engine, "OWinX")
     bot_o = await db_insert_bot(engine, "OWinO")
     factory = async_sessionmaker(engine, expire_on_commit=False)
-    result = MatchResult(result="o_wins", moves=[])
+    result = MatchResult(result=MatchOutcome.O_WINS, moves=[])
     async with factory() as session:
         await MatchRepository(session).record(bot_x, bot_o, result, "cid-o")
     async with factory() as session:
         row = (await session.execute(select(Match))).scalar_one()
-    assert row.result == "o_wins"
+    assert row.result == MatchOutcome.O_WINS
     assert row.winner_id == bot_o
 
 
@@ -176,10 +176,10 @@ async def test_match_record_persists_draw(
     bot_x = await db_insert_bot(engine, "DrawX")
     bot_o = await db_insert_bot(engine, "DrawO")
     factory = async_sessionmaker(engine, expire_on_commit=False)
-    result = MatchResult(result="cat", moves=[])
+    result = MatchResult(result=MatchOutcome.CAT, moves=[])
     async with factory() as session:
         await MatchRepository(session).record(bot_x, bot_o, result, "cid-draw")
     async with factory() as session:
         row = (await session.execute(select(Match))).scalar_one()
-    assert row.result == "cat"
+    assert row.result == MatchOutcome.CAT
     assert row.winner_id is None
