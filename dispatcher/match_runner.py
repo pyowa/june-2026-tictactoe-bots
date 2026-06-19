@@ -78,15 +78,13 @@ def run_match_from_pods(
                 response = request_turn(
                     turn.pod_ip, turn.symbol, board_to_str(board), timeout=turn_timeout
                 )
-                error = response.get("error")
-                new_board_text = response.get("board")
-                if error or not new_board_text:
-                    forfeit_error = error or "no output"
+                if response.error or not response.board:
+                    forfeit_error = response.error or "no output"
                 else:
-                    new_board = parse_board(new_board_text)
+                    new_board = parse_board(response.board)
                     if new_board is None:
                         forfeit_error = (
-                            f"invalid output: unparseable board: {new_board_text!r}"
+                            f"invalid output: unparseable board: {response.board!r}"
                         )
                     else:
                         move_error = validate_move(board, new_board, turn.symbol)

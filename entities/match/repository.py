@@ -3,7 +3,7 @@ join across `matches`, `bots × 3` (x / o / winner aliases); it's shared
 between by_id, list_all, and list_for_bot, so the construction is captured
 in the module-private `_match_select()` helper."""
 
-from typing import Any
+from typing import Any, NamedTuple
 
 from sqlalchemy import or_, select
 from sqlalchemy.engine import Row
@@ -15,32 +15,35 @@ from entities.move.model import Move
 from runner.engine import MatchOutcome, MatchResult
 
 
-def _match_select() -> Any:
+class _MatchSelect(NamedTuple):
+    stmt: Any
+    bx: Any
+    bo: Any
+
+
+def _match_select() -> _MatchSelect:
     bx = Bot.__table__.alias("bx")  # pragma: no mutate -- cosmetic SQL alias
     bo = Bot.__table__.alias("bo")  # pragma: no mutate
     bw = Bot.__table__.alias("bw")  # pragma: no mutate
-    return (
-        (
-            select(
-                Match.id,
-                bx.c.versioned_name.label("bot_x"),
-                bx.c.base_name.label("bot_x_base"),
-                bx.c.python_version.label("bot_x_python"),
-                bo.c.versioned_name.label("bot_o"),
-                bo.c.base_name.label("bot_o_base"),
-                bo.c.python_version.label("bot_o_python"),
-                bw.c.versioned_name.label("winner"),
-                Match.result,
-                Match.played_at,
-            )
-            .select_from(Match)
-            .join(bx, Match.bot_x_id == bx.c.id)
-            .join(bo, Match.bot_o_id == bo.c.id)
-            .outerjoin(bw, Match.winner_id == bw.c.id)
-        ),
-        bx,
-        bo,
+    stmt = (
+        select(
+            Match.id,
+            bx.c.versioned_name.label("bot_x"),
+            bx.c.base_name.label("bot_x_base"),
+            bx.c.python_version.label("bot_x_python"),
+            bo.c.versioned_name.label("bot_o"),
+            bo.c.base_name.label("bot_o_base"),
+            bo.c.python_version.label("bot_o_python"),
+            bw.c.versioned_name.label("winner"),
+            Match.result,
+            Match.played_at,
+        )
+        .select_from(Match)
+        .join(bx, Match.bot_x_id == bx.c.id)
+        .join(bo, Match.bot_o_id == bo.c.id)
+        .outerjoin(bw, Match.winner_id == bw.c.id)
     )
+    return _MatchSelect(stmt=stmt, bx=bx, bo=bo)
 
 
 class MatchRepository:

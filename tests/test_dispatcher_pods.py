@@ -8,6 +8,7 @@ import pytest
 from dispatcher.pods import (
     NAMESPACE,
     TURN_PORT,
+    TurnResponse,
     build_bot_pod_manifest,
     delete_pod,
     get_pod_ip,
@@ -252,7 +253,9 @@ def test_request_turn_returns_parsed_json() -> None:
     with patch("dispatcher.pods.urlopen", return_value=response_mock):
         result = request_turn("10.0.0.5", "X", ".|.|.\n.|.|.\n.|.|.")
 
-    assert result == {"board": "X|.|.\n.|.|.\n.|.|."}
+    assert isinstance(result, TurnResponse)
+    assert result.board == "X|.|.\n.|.|.\n.|.|."
+    assert result.error is None
 
 
 def test_request_turn_with_error_response() -> None:
@@ -264,7 +267,9 @@ def test_request_turn_with_error_response() -> None:
     with patch("dispatcher.pods.urlopen", return_value=response_mock):
         result = request_turn("10.0.0.5", "X", ".|.|.\n.|.|.\n.|.|.")
 
-    assert result == {"error": "runtime crash"}
+    assert isinstance(result, TurnResponse)
+    assert result.error == "runtime crash"
+    assert result.board is None
 
 
 # ---------------------------------------------------------------------------
