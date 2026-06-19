@@ -8,6 +8,7 @@ sentinel returns."""
 
 import re
 import secrets
+from dataclasses import dataclass
 
 import structlog
 from fastapi import Request, UploadFile
@@ -33,6 +34,13 @@ from web.utils import (
 _log = structlog.get_logger()
 
 _RESERVED_VERSION_SUFFIX = re.compile(r"V\d+$")
+
+
+@dataclass
+class _OwnerContext:
+    owned: dict[str, str]
+    owner_token: str
+    bot_name: str
 
 
 class _SubmissionError(Exception):
@@ -115,14 +123,12 @@ async def _persist_bot(
 def _success_response(
     request: Request,
     name: str,
-    owned: dict[str, str],
-    owner_token: str,
-    bot_name: str,
+    owner: _OwnerContext,
     bots: list,
 ) -> HTMLResponse:
     """Render the index page with a success banner and (re)set the ownership
     cookie so future submissions of the same base name are recognized."""
-    owned[bot_name] = owner_token
+    owner.owned[owner.bot_name] = owner.owner_token
     response = templates.TemplateResponse(
         request,
         "index.html",  # pragma: no mutate -- macOS FS masks case
@@ -130,7 +136,7 @@ def _success_response(
     )
     response.set_cookie(
         key="ttt_owned_bots",
-        value=encode_cookie(owned),
+        value=encode_cookie(owner.owned),
         httponly=True,
         samesite="lax",
     )
@@ -170,4 +176,9 @@ async def handle_submission(
     except _SubmissionError as exc:
         return render_index_response(request, error=exc.message)
 
-    return _success_response(request, name, owned, owner_token, bot_name, listing)
+    return _success_response(
+        request,
+        name,
+        _OwnerContext(owned=owned, owner_token=owner_token, bot_name=bot_name),
+        listing,
+    )
