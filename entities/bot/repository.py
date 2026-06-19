@@ -13,6 +13,161 @@ from entities.bot.model import Bot
 from entities.match.model import Match
 
 
+def _latest_bot_cte() -> Any:
+    """Build the two CTEs that find the latest version per family.
+
+    Returns the `latest_bot` CTE — the caller only needs that one;
+    `latest_per_family` is internal to this helper."""
+    latest_per_family = (
+        select(
+            Bot.base_name.label("base_name"),
+            func.max(Bot.version).label("max_v"),
+        )
+        .group_by(Bot.base_name)
+        .cte("latest_per_family")
+    )
+
+    latest_bot = (
+        select(
+            Bot.id.label("id"),
+            Bot.base_name.label("base_name"),
+            Bot.versioned_name.label("versioned_name"),
+            Bot.submitted_at.label("submitted_at"),
+        )
+        .join(
+            latest_per_family,
+            and_(
+                latest_per_family.c.base_name == Bot.base_name,
+                latest_per_family.c.max_v == Bot.version,
+            ),
+        )
+        .cte("latest_bot")
+    )
+
+    return latest_bot
+
+
+def _per_version_stats(
+    bot_id_expr: Any,
+) -> tuple[Any, Any, Any, Any]:
+    """Build the four correlated scalar subqueries for per-version stats.
+
+    Takes the id expression to correlate against (either `latest_bot.c.id`
+    from the leaderboard CTE or `Bot.id` for family).
+    Returns a 4-tuple: (clean_wins, forfeit_wins, draws, losses)."""
+    clean_wins = (
+        select(func.count())
+        .select_from(Match)
+        .where(
+            Match.winner_id == bot_id_expr,
+            Match.result.in_(("x_wins", "o_wins")),
+        )
+        .scalar_subquery()
+    )
+    forfeit_wins = (
+        select(func.count())
+        .select_from(Match)
+        .where(
+            Match.winner_id == bot_id_expr,
+            Match.result.in_(("x_forfeit", "o_forfeit")),
+        )
+        .scalar_subquery()
+    )
+    draws = (
+        select(func.count())
+        .select_from(Match)
+        .where(
+            or_(Match.bot_x_id == bot_id_expr, Match.bot_o_id == bot_id_expr),
+            Match.result == "cat",
+        )
+        .scalar_subquery()
+    )
+    losses = (
+        select(func.count())
+        .select_from(Match)
+        .where(
+            or_(Match.bot_x_id == bot_id_expr, Match.bot_o_id == bot_id_expr),
+            Match.result != "cat",
+            or_(Match.winner_id.is_(None), Match.winner_id != bot_id_expr),
+        )
+        .scalar_subquery()
+    )
+    return clean_wins, forfeit_wins, draws, losses
+
+
+def _lifetime_stats(
+    base_name_expr: Any,
+    *extra_correlate: Any,
+) -> tuple[Any, Any]:
+    """Build `lifetime_wins` and `lifetime_losses` subqueries.
+
+    Lifetime W/L spans every version of the family, excluding pure
+    intra-family matches so a family playing itself doesn't inflate both
+    sides. `Bot` is aliased three ways (bx / bo / bw) so the joins are
+    unambiguous in the generated SQL.
+
+    Takes the base_name expression (e.g. `latest_bot.c.base_name`).
+
+    `extra_correlate` should include any outer CTE/subquery that `base_name_expr`
+    is drawn from. The `winner_not_in_family` NOT EXISTS is nested two levels
+    deep; SQLAlchemy only auto-correlates one level up, so the outer CTE must
+    be listed explicitly to prevent it from leaking into the inner FROM clause.
+
+    Returns a 2-tuple: (lifetime_wins, lifetime_losses)."""
+    bx = aliased(Bot, name="bx")
+    bo = aliased(Bot, name="bo")
+    bw = aliased(Bot, name="bw")
+
+    lifetime_wins = (
+        select(func.count())
+        .select_from(Match)
+        .join(bx, bx.id == Match.bot_x_id)
+        .join(bo, bo.id == Match.bot_o_id)
+        .join(bw, bw.id == Match.winner_id)
+        .where(
+            bw.base_name == base_name_expr,
+            or_(bx.base_name != base_name_expr, bo.base_name != base_name_expr),
+        )
+        .scalar_subquery()
+    )
+
+    # The NOT EXISTS subquery: "the winner of this match does NOT belong to
+    # the current family." Implemented as a separate scalar subquery whose
+    # bots row is yet another alias (bw_inner) so it doesn't conflict with bw.
+    # `.correlate(latest_bot)` is required: this subquery is nested two levels
+    # deep (inside lifetime_losses, which itself is a subquery of the outer
+    # `SELECT FROM latest_bot`), and SQLAlchemy will only auto-correlate one
+    # level up. Without the explicit correlate, `latest_bot` would be added
+    # to the inner FROM clause and the NOT EXISTS would be uncorrelated.
+    bw_inner = aliased(Bot, name="bw_inner")
+    winner_not_in_family = ~(
+        select(1)
+        .select_from(bw_inner)
+        .where(
+            bw_inner.id == Match.winner_id,
+            bw_inner.base_name == base_name_expr,
+        )
+        .correlate(Match, *extra_correlate)
+        .exists()
+    )
+
+    lifetime_losses = (
+        select(func.count())
+        .select_from(Match)
+        .join(bx, bx.id == Match.bot_x_id)
+        .join(bo, bo.id == Match.bot_o_id)
+        .where(
+            Match.result != "cat",
+            or_(bx.base_name == base_name_expr, bo.base_name == base_name_expr),
+            or_(bx.base_name != base_name_expr, bo.base_name != base_name_expr),
+            or_(Match.winner_id.is_(None), winner_not_in_family),
+        )
+        .scalar_subquery()
+    )
+
+    return lifetime_wins, lifetime_losses
+
+
 class BotRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -108,128 +263,13 @@ class BotRepository:
         # in the original (Bot used twice in one query — once as the outer "this
         # family's latest version", once as the joined opponent/winner row in the
         # lifetime W/L subqueries).
-        latest_per_family = (
-            select(
-                Bot.base_name.label("base_name"),
-                func.max(Bot.version).label("max_v"),
-            )
-            .group_by(Bot.base_name)
-            .cte("latest_per_family")
-        )
-
-        latest_bot = (
-            select(
-                Bot.id.label("id"),
-                Bot.base_name.label("base_name"),
-                Bot.versioned_name.label("versioned_name"),
-                Bot.submitted_at.label("submitted_at"),
-            )
-            .join(
-                latest_per_family,
-                and_(
-                    latest_per_family.c.base_name == Bot.base_name,
-                    latest_per_family.c.max_v == Bot.version,
-                ),
-            )
-            .cte("latest_bot")
-        )
+        latest_bot = _latest_bot_cte()
 
         lb_id = latest_bot.c.id
         lb_base = latest_bot.c.base_name
 
-        # Per-version stats (only the latest version of this family).
-        clean_wins = (
-            select(func.count())
-            .select_from(Match)
-            .where(
-                Match.winner_id == lb_id,
-                Match.result.in_(("x_wins", "o_wins")),
-            )
-            .scalar_subquery()
-        )
-        forfeit_wins = (
-            select(func.count())
-            .select_from(Match)
-            .where(
-                Match.winner_id == lb_id,
-                Match.result.in_(("x_forfeit", "o_forfeit")),
-            )
-            .scalar_subquery()
-        )
-        draws = (
-            select(func.count())
-            .select_from(Match)
-            .where(
-                or_(Match.bot_x_id == lb_id, Match.bot_o_id == lb_id),
-                Match.result == "cat",
-            )
-            .scalar_subquery()
-        )
-        losses = (
-            select(func.count())
-            .select_from(Match)
-            .where(
-                or_(Match.bot_x_id == lb_id, Match.bot_o_id == lb_id),
-                Match.result != "cat",
-                or_(Match.winner_id.is_(None), Match.winner_id != lb_id),
-            )
-            .scalar_subquery()
-        )
-
-        # Lifetime W/L across every version of the family, excluding pure
-        # intra-family matches so a family playing itself doesn't inflate both
-        # sides. `Bot` is aliased three ways (bx / bo / bw) so the joins are
-        # unambiguous in the generated SQL.
-        bx = aliased(Bot, name="bx")
-        bo = aliased(Bot, name="bo")
-        bw = aliased(Bot, name="bw")
-
-        lifetime_wins = (
-            select(func.count())
-            .select_from(Match)
-            .join(bx, bx.id == Match.bot_x_id)
-            .join(bo, bo.id == Match.bot_o_id)
-            .join(bw, bw.id == Match.winner_id)
-            .where(
-                bw.base_name == lb_base,
-                or_(bx.base_name != lb_base, bo.base_name != lb_base),
-            )
-            .scalar_subquery()
-        )
-
-        # The NOT EXISTS subquery: "the winner of this match does NOT belong to
-        # the current family." Implemented as a separate scalar subquery whose
-        # bots row is yet another alias (bw_inner) so it doesn't conflict with bw.
-        # `.correlate(latest_bot)` is required: this subquery is nested two levels
-        # deep (inside lifetime_losses, which itself is a subquery of the outer
-        # `SELECT FROM latest_bot`), and SQLAlchemy will only auto-correlate one
-        # level up. Without the explicit correlate, `latest_bot` would be added
-        # to the inner FROM clause and the NOT EXISTS would be uncorrelated.
-        bw_inner = aliased(Bot, name="bw_inner")
-        winner_not_in_family = ~(
-            select(1)
-            .select_from(bw_inner)
-            .where(
-                bw_inner.id == Match.winner_id,
-                bw_inner.base_name == lb_base,
-            )
-            .correlate(latest_bot, Match)
-            .exists()
-        )
-
-        lifetime_losses = (
-            select(func.count())
-            .select_from(Match)
-            .join(bx, bx.id == Match.bot_x_id)
-            .join(bo, bo.id == Match.bot_o_id)
-            .where(
-                Match.result != "cat",
-                or_(bx.base_name == lb_base, bo.base_name == lb_base),
-                or_(bx.base_name != lb_base, bo.base_name != lb_base),
-                or_(Match.winner_id.is_(None), winner_not_in_family),
-            )
-            .scalar_subquery()
-        )
+        clean_wins, forfeit_wins, draws, losses = _per_version_stats(lb_id)
+        lifetime_wins, lifetime_losses = _lifetime_stats(lb_base, latest_bot)
 
         stats = (
             select(
@@ -261,43 +301,7 @@ class BotRepository:
         # against the outer `Bot.id`, which SQLAlchemy correlates
         # automatically because we reference `Bot` columns inside the inner
         # select.
-        clean_wins = (
-            select(func.count())
-            .select_from(Match)
-            .where(
-                Match.winner_id == Bot.id,
-                Match.result.in_(("x_wins", "o_wins")),
-            )
-            .scalar_subquery()
-        )
-        forfeit_wins = (
-            select(func.count())
-            .select_from(Match)
-            .where(
-                Match.winner_id == Bot.id,
-                Match.result.in_(("x_forfeit", "o_forfeit")),
-            )
-            .scalar_subquery()
-        )
-        draws = (
-            select(func.count())
-            .select_from(Match)
-            .where(
-                or_(Match.bot_x_id == Bot.id, Match.bot_o_id == Bot.id),
-                Match.result == "cat",
-            )
-            .scalar_subquery()
-        )
-        losses = (
-            select(func.count())
-            .select_from(Match)
-            .where(
-                or_(Match.bot_x_id == Bot.id, Match.bot_o_id == Bot.id),
-                Match.result != "cat",
-                or_(Match.winner_id.is_(None), Match.winner_id != Bot.id),
-            )
-            .scalar_subquery()
-        )
+        clean_wins, forfeit_wins, draws, losses = _per_version_stats(Bot.id)
 
         stmt = (
             select(

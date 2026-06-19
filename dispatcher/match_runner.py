@@ -31,6 +31,63 @@ def _forfeit_label(player: str) -> str:
     return "x_forfeit" if player == "x" else "o_forfeit"
 
 
+def _play_turn(
+    player: str,
+    symbol: str,
+    pod_ip: str,
+    board: Board,
+    move_number: int,
+    correlation_id: str,
+    timeout: float,
+) -> tuple[Board, None] | tuple[None, str]:
+    """Returns (new_board, None) on success or (None, forfeit_error) on failure."""
+    _log.info(
+        "turn_request",
+        correlation_id=correlation_id,
+        move_number=move_number,
+        symbol=symbol,
+    )
+
+    forfeit_error: str | None = None
+
+    try:
+        response = request_turn(pod_ip, symbol, board_to_str(board), timeout=timeout)
+        error = response.get("error")
+        new_board_text = response.get("board")
+        if error or not new_board_text:
+            forfeit_error = error or "no output"
+        else:
+            new_board = parse_board(new_board_text)
+            if new_board is None:
+                forfeit_error = (
+                    f"invalid output: unparseable board: {new_board_text!r}"
+                )
+            else:
+                move_error = validate_move(board, new_board, symbol)
+                if move_error:
+                    forfeit_error = move_error
+    except URLError as exc:
+        forfeit_error = f"HTTP error: {exc}"
+
+    if forfeit_error is not None:
+        _log.info(
+            "turn_result",
+            correlation_id=correlation_id,
+            move_number=move_number,
+            outcome="forfeit",
+            error=forfeit_error,
+        )
+        return None, forfeit_error
+
+    _log.info(
+        "turn_result",
+        correlation_id=correlation_id,
+        move_number=move_number,
+        outcome="valid",
+    )
+    return new_board, None  # type: ignore[return-value]
+
+
 def run_match_from_pods(
     core_v1: Any,
     pod_name_x: str,
@@ -56,56 +113,16 @@ def run_match_from_pods(
     while True:
         for player, symbol, pod_ip in turns:
             move_number += 1
-            _log.info(
-                "turn_request",
-                correlation_id=correlation_id,
-                move_number=move_number,
-                symbol=symbol,
+            new_board, forfeit_error = _play_turn(
+                player, symbol, pod_ip, board, move_number, correlation_id, turn_timeout
             )
-
-            forfeit_error: str | None = None
-
-            try:
-                response = request_turn(
-                    pod_ip, symbol, board_to_str(board), timeout=turn_timeout
-                )
-                error = response.get("error")
-                new_board_text = response.get("board")
-                if error or not new_board_text:
-                    forfeit_error = error or "no output"
-                else:
-                    new_board = parse_board(new_board_text)
-                    if new_board is None:
-                        forfeit_error = (
-                            f"invalid output: unparseable board: {new_board_text!r}"
-                        )
-                    else:
-                        move_error = validate_move(board, new_board, symbol)
-                        if move_error:
-                            forfeit_error = move_error
-            except URLError as exc:
-                forfeit_error = f"HTTP error: {exc}"
-
             if forfeit_error is not None:
-                _log.info(
-                    "turn_result",
-                    correlation_id=correlation_id,
-                    move_number=move_number,
-                    outcome="forfeit",
-                    error=forfeit_error,
-                )
                 moves.append(
                     Move(move_number, player, board_to_str(board), forfeit_error)
                 )
                 return MatchResult(_forfeit_label(player), moves)
 
             board = new_board  # type: ignore[assignment]
-            _log.info(
-                "turn_result",
-                correlation_id=correlation_id,
-                move_number=move_number,
-                outcome="valid",
-            )
             moves.append(Move(move_number, player, board_to_str(board)))
             outcome = check_winner(board)
             if outcome:
