@@ -20,6 +20,7 @@ from dispatcher.pods import (
     wait_for_http_ready,
     wait_for_pod_ready,
 )
+from entities.bot.model import Bot
 from entities.bot.repository import BotRepository
 from messaging.client import BROKER_URL
 from messaging.contracts import (
@@ -28,30 +29,76 @@ from messaging.contracts import (
     BuildPodMessage,
     PodReadyMessage,
 )
-from web.runtimes import RUNTIMES
+from web.runtimes import RUNTIMES, Runtime
 
 POD_TIMEOUT = float(os.environ.get("POD_TIMEOUT", "60"))
 
 _log = structlog.get_logger()
 
 
-def _build_pod_and_wait(
+async def _fetch_bot_and_runtime(
+    msg: BuildPodMessage,
+) -> tuple[Bot, Runtime] | None:
+    """DB lookup + runtime validation + logging.
+
+    Returns None if bot not found or runtime unknown (caller returns early)."""
+    runtime = RUNTIMES.get(msg.runtime_key)
+    if runtime is None:
+        _log.error("pod_builder_unknown_runtime", runtime_key=msg.runtime_key)
+        return None
+
+    async with get_session() as session:
+        bots = BotRepository(session)
+        bot_map = await bots.by_ids([msg.bot_id])
+
+    bot = bot_map.get(msg.bot_id)
+    if bot is None:
+        _log.error("pod_builder_bot_not_found", bot_id=msg.bot_id)
+        return None
+
+    return bot, runtime
+
+
+async def _build_register_and_notify(
+    bot: Bot,
+    runtime: Runtime,
     core_v1: Any,
-    pod_name: str,
-    image: str,
-    source_b64: str,
-    bot_id: int,
-    *,
-    timeout: float,
+    channel: Any,
 ) -> None:
-    manifest = build_bot_pod_manifest(pod_name, image, source_b64, bot_id)
-    core_v1.create_namespaced_pod("bots", body=manifest)
-    wait_for_pod_ready(core_v1, pod_name, timeout=timeout)
-    pod_ip = get_pod_ip(core_v1, pod_name)
-    wait_for_http_ready(pod_ip, timeout=timeout)
+    """Pod build + set_pod_ready DB update + publish PodReadyMessage."""
+    source_b64 = base64.b64encode(bot.source or b"").decode("ascii")
+    pod_name = f"bot-{bot.id}"
+
+    _log.info("pod_building", bot_id=bot.id, pod_name=pod_name)
+
+    loop = asyncio.get_running_loop()
+
+    def _build_and_wait() -> None:
+        manifest = build_bot_pod_manifest(
+            pod_name, runtime.image, source_b64, bot.id
+        )
+        core_v1.create_namespaced_pod("bots", body=manifest)
+        wait_for_pod_ready(core_v1, pod_name, timeout=POD_TIMEOUT)
+        pod_ip = get_pod_ip(core_v1, pod_name)
+        wait_for_http_ready(pod_ip, timeout=POD_TIMEOUT)
+
+    await loop.run_in_executor(None, functools.partial(_build_and_wait))
+
+    async with get_session() as session:
+        bots = BotRepository(session)
+        await bots.set_pod_ready(bot.id, pod_name)
+
+    await channel.default_exchange.publish(
+        aio_pika.Message(
+            body=PodReadyMessage(bot_id=bot.id).model_dump_json().encode(),
+        ),
+        routing_key=POD_READY_QUEUE,
+    )
+
+    _log.info("pod_ready", bot_id=bot.id, pod_name=pod_name)
 
 
-# TODO smell
+
 async def handle_build_pod_message(
     message: Any,
     channel: Any,
@@ -64,52 +111,12 @@ async def handle_build_pod_message(
             _log.error("pod_builder_invalid_json")
             return
 
-        runtime = RUNTIMES.get(msg.runtime_key)
-        if runtime is None:
-            _log.error("pod_builder_unknown_runtime", runtime_key=msg.runtime_key)
+        result = await _fetch_bot_and_runtime(msg)
+        if result is None:
             return
+        bot, runtime = result
 
-        async with get_session() as session:
-            bots = BotRepository(session)
-            bot_map = await bots.by_ids([msg.bot_id])
-
-        bot = bot_map.get(msg.bot_id)
-        if bot is None:
-            _log.error("pod_builder_bot_not_found", bot_id=msg.bot_id)
-            return
-
-        source_b64 = base64.b64encode(bot.source or b"").decode("ascii")
-        pod_name = f"bot-{msg.bot_id}"
-
-        _log.info("pod_building", bot_id=msg.bot_id, pod_name=pod_name)
-
-        await asyncio.get_running_loop().run_in_executor(
-            None,
-            functools.partial(
-                _build_pod_and_wait,
-                core_v1,
-                pod_name,
-                runtime.image,
-                source_b64,
-                msg.bot_id,
-                timeout=POD_TIMEOUT,
-            ),
-        )
-
-        async with get_session() as session:
-            bots = BotRepository(session)
-            await bots.set_pod_ready(msg.bot_id, pod_name)
-
-        await channel.default_exchange.publish(
-            aio_pika.Message(
-                body=PodReadyMessage(bot_id=msg.bot_id).model_dump_json().encode(),
-                delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
-                content_type="application/json",
-            ),
-            routing_key=POD_READY_QUEUE,
-        )
-
-        _log.info("pod_ready", bot_id=msg.bot_id, pod_name=pod_name)
+        await _build_register_and_notify(bot, runtime, core_v1, channel)
 
 
 async def run() -> None:  # pragma: no cover

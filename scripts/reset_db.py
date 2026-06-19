@@ -33,6 +33,39 @@ RABBITMQ_USER = os.environ.get("RABBITMQ_USER", "guest")
 RABBITMQ_PASS = os.environ.get("RABBITMQ_PASS", "guest")
 
 
+def _list_queues(auth_header: str) -> list[dict] | None:
+    """HTTP GET /api/queues; returns None if unreachable, list otherwise."""
+    try:
+        req = urllib.request.Request(
+            f"{RABBITMQ_MGMT_URL}/api/queues",
+            headers={"Authorization": auth_header},
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return json.load(resp)  # type: ignore[no-any-return]
+    except (urllib.error.URLError, TimeoutError) as exc:
+        print(f"  Skipping queue purge: RabbitMQ management API unreachable ({exc}).")
+        return None
+
+
+def _purge_queue(name: str, vhost: str, auth_header: str) -> bool:
+    """HTTP DELETE /api/queues/{vhost}/{name}/contents.
+
+    Returns True if purged, False on 404 or other HTTP error."""
+    encoded_vhost = urllib.parse.quote(vhost, safe="")
+    encoded_name = urllib.parse.quote(name, safe="")
+    url = f"{RABBITMQ_MGMT_URL}/api/queues/{encoded_vhost}/{encoded_name}/contents"
+    req = urllib.request.Request(
+        url, method="DELETE", headers={"Authorization": auth_header}
+    )
+    try:
+        urllib.request.urlopen(req, timeout=5)
+        return True
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404:
+            print(f"  Failed to purge {name}: {exc}")
+        return False
+
+
 def purge_rabbitmq_queues() -> None:
     """Empty every queue on the default vhost via the management HTTP API.
 
@@ -42,15 +75,8 @@ def purge_rabbitmq_queues() -> None:
     auth = base64.b64encode(f"{RABBITMQ_USER}:{RABBITMQ_PASS}".encode()).decode()
     auth_header = f"Basic {auth}"
 
-    try:
-        req = urllib.request.Request(
-            f"{RABBITMQ_MGMT_URL}/api/queues",
-            headers={"Authorization": auth_header},
-        )
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            queues = json.load(resp)
-    except (urllib.error.URLError, TimeoutError) as exc:
-        print(f"  Skipping queue purge: RabbitMQ management API unreachable ({exc}).")
+    queues = _list_queues(auth_header)
+    if queues is None:
         return
 
     purged = 0
@@ -61,19 +87,9 @@ def purge_rabbitmq_queues() -> None:
         # They'll be auto-deleted when that connection dies — skip them.
         if name.startswith("amq"):
             continue
-        vhost = urllib.parse.quote(q["vhost"], safe="")
-        encoded = urllib.parse.quote(name, safe="")
-        url = f"{RABBITMQ_MGMT_URL}/api/queues/{vhost}/{encoded}/contents"
-        req = urllib.request.Request(
-            url, method="DELETE", headers={"Authorization": auth_header}
-        )
-        try:
-            urllib.request.urlopen(req, timeout=5)
+        if _purge_queue(name, q["vhost"], auth_header):
             print(f"  Purged queue: {name} ({q.get('messages', 0)} messages)")
             purged += 1
-        except urllib.error.HTTPError as exc:
-            if exc.code != 404:
-                print(f"  Failed to purge {name}: {exc}")
     print(f"  Purged {purged} queue(s).")
 
 
