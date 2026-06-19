@@ -9,7 +9,8 @@ caller (no global FastAPI state).
 import ast
 import json
 import urllib.parse
-from typing import Any
+from collections.abc import Sequence
+from typing import Any, Protocol
 
 from web.runtimes import DEFAULT_RUNTIME_KEY, RUNTIMES
 
@@ -115,9 +116,18 @@ def encode_cookie(owned: dict) -> str:
     return urllib.parse.quote(json.dumps(owned), safe="")  # pragma: no mutate
 
 
+class _VersionRow(Protocol):
+    versioned_name: str
+
+
+class _MatchRow(Protocol):
+    bot_x: str
+    bot_o: str
+
+
 def group_matches_by_version(
-    versions: list[Any], matches: list[Any]
-) -> dict[str, list[Any]]:
+    versions: Sequence[_VersionRow], matches: Sequence[_MatchRow]
+) -> dict[str, list[_MatchRow]]:
     """Group `matches` by which versioned bot in `versions` participated.
 
     `versions` and `matches` are both duck-typed SQLAlchemy `Row` objects

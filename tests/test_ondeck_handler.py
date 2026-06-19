@@ -43,7 +43,18 @@ def _make_session_ctx() -> MagicMock:
 # ---------------------------------------------------------------------------
 
 
-async def test_handle_match_ondeck_happy_path_records_result() -> None:
+@patch("asyncio.get_running_loop")
+@patch("dispatcher.ondeck_handler.run_match_from_pods")
+@patch("dispatcher.ondeck_handler.MatchRepository")
+@patch("dispatcher.ondeck_handler.BotRepository")
+@patch("dispatcher.ondeck_handler.get_session")
+async def test_handle_match_ondeck_happy_path_records_result(
+    mock_get_session: MagicMock,
+    mock_bot_repo_cls: MagicMock,
+    mock_match_repo_cls: MagicMock,
+    mock_run_match: MagicMock,
+    mock_loop: MagicMock,
+) -> None:
     bot_x = _make_bot_mock(1, pod_name="pod-bot-1")
     bot_o = _make_bot_mock(2, pod_name="pod-bot-2")
     msg_body = MatchOndeck(bot_x_id=1, bot_o_id=2, correlation_id="cid-happy")
@@ -53,42 +64,38 @@ async def test_handle_match_ondeck_happy_path_records_result() -> None:
 
     bot_repo_instance = MagicMock()
     bot_repo_instance.by_ids = AsyncMock(return_value={1: bot_x, 2: bot_o})
+    mock_bot_repo_cls.return_value = bot_repo_instance
 
     match_repo_instance = MagicMock()
     match_repo_instance.record = AsyncMock()
+    mock_match_repo_cls.return_value = match_repo_instance
 
     fake_result = MatchResult(MatchOutcome.X_WINS, [])
+    mock_run_match.return_value = fake_result
 
-    with (
-        patch(
-            "dispatcher.ondeck_handler.get_session",
-            side_effect=[_make_session_ctx(), _make_session_ctx()],
-        ),
-        patch(
-            "dispatcher.ondeck_handler.BotRepository",
-            return_value=bot_repo_instance,
-        ),
-        patch(
-            "dispatcher.ondeck_handler.MatchRepository",
-            return_value=match_repo_instance,
-        ),
-        patch(
-            "dispatcher.ondeck_handler.run_match_from_pods",
-            return_value=fake_result,
-        ),
-        patch("asyncio.get_running_loop") as mock_loop,
-    ):
+    mock_get_session.side_effect = [_make_session_ctx(), _make_session_ctx()]
 
-        async def fake_run_in_executor(executor, fn, *args):
-            return fn()
+    async def fake_run_in_executor(executor, fn, *args):
+        return fn()
 
-        mock_loop.return_value.run_in_executor = fake_run_in_executor
-        await handle_match_ondeck(message, channel, core_v1)
+    mock_loop.return_value.run_in_executor = fake_run_in_executor
+    await handle_match_ondeck(message, channel, core_v1)
 
     match_repo_instance.record.assert_awaited_once()
 
 
-async def test_handle_match_ondeck_happy_path_match_result_passed_to_record() -> None:
+@patch("asyncio.get_running_loop")
+@patch("dispatcher.ondeck_handler.run_match_from_pods")
+@patch("dispatcher.ondeck_handler.MatchRepository")
+@patch("dispatcher.ondeck_handler.BotRepository")
+@patch("dispatcher.ondeck_handler.get_session")
+async def test_handle_match_ondeck_happy_path_match_result_passed_to_record(
+    mock_get_session: MagicMock,
+    mock_bot_repo_cls: MagicMock,
+    mock_match_repo_cls: MagicMock,
+    mock_run_match: MagicMock,
+    mock_loop: MagicMock,
+) -> None:
     bot_x = _make_bot_mock(3, pod_name="pod-bot-3")
     bot_o = _make_bot_mock(4, pod_name="pod-bot-4")
     msg_body = MatchOndeck(bot_x_id=3, bot_o_id=4, correlation_id="cid-args")
@@ -98,37 +105,22 @@ async def test_handle_match_ondeck_happy_path_match_result_passed_to_record() ->
 
     bot_repo_instance = MagicMock()
     bot_repo_instance.by_ids = AsyncMock(return_value={3: bot_x, 4: bot_o})
+    mock_bot_repo_cls.return_value = bot_repo_instance
 
     match_repo_instance = MagicMock()
     match_repo_instance.record = AsyncMock()
+    mock_match_repo_cls.return_value = match_repo_instance
 
     fake_result = MatchResult(MatchOutcome.O_WINS, [])
+    mock_run_match.return_value = fake_result
 
-    with (
-        patch(
-            "dispatcher.ondeck_handler.get_session",
-            side_effect=[_make_session_ctx(), _make_session_ctx()],
-        ),
-        patch(
-            "dispatcher.ondeck_handler.BotRepository",
-            return_value=bot_repo_instance,
-        ),
-        patch(
-            "dispatcher.ondeck_handler.MatchRepository",
-            return_value=match_repo_instance,
-        ),
-        patch(
-            "dispatcher.ondeck_handler.run_match_from_pods",
-            return_value=fake_result,
-        ),
-        patch("asyncio.get_running_loop") as mock_loop,
-    ):
+    mock_get_session.side_effect = [_make_session_ctx(), _make_session_ctx()]
 
-        async def fake_run_in_executor(executor, fn, *args):
-            return fn()
+    async def fake_run_in_executor(executor, fn, *args):
+        return fn()
 
-        mock_loop.return_value.run_in_executor = fake_run_in_executor
-        await handle_match_ondeck(message, channel, core_v1)
+    mock_loop.return_value.run_in_executor = fake_run_in_executor
+    await handle_match_ondeck(message, channel, core_v1)
 
     match_repo_instance.record.assert_awaited_once_with(3, 4, fake_result, "cid-args")
 
@@ -160,7 +152,14 @@ async def test_handle_match_ondeck_invalid_json_acks_silently() -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_handle_match_ondeck_bot_not_found_acks_silently() -> None:
+@patch("dispatcher.ondeck_handler.MatchRepository")
+@patch("dispatcher.ondeck_handler.BotRepository")
+@patch("dispatcher.ondeck_handler.get_session")
+async def test_handle_match_ondeck_bot_not_found_acks_silently(
+    mock_get_session: MagicMock,
+    mock_bot_repo_cls: MagicMock,
+    mock_match_repo_cls: MagicMock,
+) -> None:
     msg_body = MatchOndeck(bot_x_id=999, bot_o_id=998, correlation_id="cid-notfound")
     message = _make_message(msg_body.model_dump_json().encode())
     channel = MagicMock()
@@ -168,25 +167,15 @@ async def test_handle_match_ondeck_bot_not_found_acks_silently() -> None:
 
     bot_repo_instance = MagicMock()
     bot_repo_instance.by_ids = AsyncMock(return_value={})  # neither bot found
+    mock_bot_repo_cls.return_value = bot_repo_instance
 
     match_repo_instance = MagicMock()
     match_repo_instance.record = AsyncMock()
+    mock_match_repo_cls.return_value = match_repo_instance
 
-    with (
-        patch(
-            "dispatcher.ondeck_handler.get_session",
-            return_value=_make_session_ctx(),
-        ),
-        patch(
-            "dispatcher.ondeck_handler.BotRepository",
-            return_value=bot_repo_instance,
-        ),
-        patch(
-            "dispatcher.ondeck_handler.MatchRepository",
-            return_value=match_repo_instance,
-        ),
-    ):
-        await handle_match_ondeck(message, channel, core_v1)
+    mock_get_session.return_value = _make_session_ctx()
+
+    await handle_match_ondeck(message, channel, core_v1)
 
     match_repo_instance.record.assert_not_awaited()
 
@@ -196,7 +185,14 @@ async def test_handle_match_ondeck_bot_not_found_acks_silently() -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_handle_match_ondeck_bot_has_no_pod_name_acks_silently() -> None:
+@patch("dispatcher.ondeck_handler.MatchRepository")
+@patch("dispatcher.ondeck_handler.BotRepository")
+@patch("dispatcher.ondeck_handler.get_session")
+async def test_handle_match_ondeck_bot_has_no_pod_name_acks_silently(
+    mock_get_session: MagicMock,
+    mock_bot_repo_cls: MagicMock,
+    mock_match_repo_cls: MagicMock,
+) -> None:
     bot_x = _make_bot_mock(5, pod_name=None)  # pod_name is None
     bot_o = _make_bot_mock(6, pod_name="pod-bot-6")
     msg_body = MatchOndeck(bot_x_id=5, bot_o_id=6, correlation_id="cid-nopod")
@@ -206,24 +202,14 @@ async def test_handle_match_ondeck_bot_has_no_pod_name_acks_silently() -> None:
 
     bot_repo_instance = MagicMock()
     bot_repo_instance.by_ids = AsyncMock(return_value={5: bot_x, 6: bot_o})
+    mock_bot_repo_cls.return_value = bot_repo_instance
 
     match_repo_instance = MagicMock()
     match_repo_instance.record = AsyncMock()
+    mock_match_repo_cls.return_value = match_repo_instance
 
-    with (
-        patch(
-            "dispatcher.ondeck_handler.get_session",
-            return_value=_make_session_ctx(),
-        ),
-        patch(
-            "dispatcher.ondeck_handler.BotRepository",
-            return_value=bot_repo_instance,
-        ),
-        patch(
-            "dispatcher.ondeck_handler.MatchRepository",
-            return_value=match_repo_instance,
-        ),
-    ):
-        await handle_match_ondeck(message, channel, core_v1)
+    mock_get_session.return_value = _make_session_ctx()
+
+    await handle_match_ondeck(message, channel, core_v1)
 
     match_repo_instance.record.assert_not_awaited()

@@ -70,7 +70,7 @@ Candidate refactoring targets. Ordered roughly by severity within each section.
 - **`handle_build_pod_message()` (`dispatcher/pod_builder.py:54`)** — deserializes JSON, validates runtime, queries DB, creates pod, waits for readiness, updates DB, publishes reply. Seven concerns.
 - ~~**`handle_match_ondeck()` (`dispatcher/ondeck_handler.py:23`)** — deserializes JSON, validates bots, checks pod existence, runs match, persists result.~~
 - **`run_match_from_pods()` (`dispatcher/match_runner.py:34`)** — looks up IPs, drives game loop, classifies errors, records moves.
-- **`leaderboard()` (`entities/bot/repository.py:104`)** — latest-version filtering, per-version stats, lifetime rollup, intra-family exclusion. These are logically distinct queries stitched into one method.
+- ~~**`leaderboard()` (`entities/bot/repository.py:104`)** — latest-version filtering, per-version stats, lifetime rollup, intra-family exclusion. These are logically distinct queries stitched into one method.~~
 - ~~**`handle_pod_ready_message()` (`match_scheduler/main.py:28`)** — deserializes JSON, validates message, queries DB, triggers match scheduling. Mixes I/O and orchestration.~~
 - **`serve_rpc()` (`messaging/rpc_server.py:14`)** — sets up queue consumption, processes messages, and publishes replies. The handler coupling makes it hard to test the transport and logic separately.
 - ~~**`main()` (`scripts/seed_example_bots.py:35`)** — clears DB, reads files from disk, parses bots, and inserts them. Multiple distinct phases in one function.~~
@@ -92,18 +92,18 @@ Candidate refactoring targets. Ordered roughly by severity within each section.
 - ~~**`entities/match/repository.py:19–44`** — `_match_select()` returns a 3-tuple `(stmt, bx, bo)` with positional meaning. A named dataclass or `TypedDict` would clarify.~~
 - ~~**`dispatcher/pods.py:117–129`** — `request_turn()` returns `dict[str, Any]` where callers must know to check for `"error"` vs `"board"` keys. A small `TurnResult` dataclass with a discriminated union would help.~~
 - ~~**`dispatcher/match_runner.py:50–53`** — `turns` is a tuple of 3-tuples with positional semantics (symbol string, board character, IP). No names.~~ (resolved in Group 1 via `_Turn` dataclass)
-- **`web/utils.py:118–136`** — `group_matches_by_version()` returns `dict[str, list[Any]]`; the `Any` hides the row structure.
+- ~~**`web/utils.py:118–136`** — `group_matches_by_version()` returns `dict[str, list[Any]]`; the `Any` hides the row structure.~~
 
 ---
 
 ## Other notable smells
 
-- **Implicit state machine in `run_match_from_pods()`** (`dispatcher/match_runner.py:56–112`) — a `while True` loop with player-alternation and early returns. The flow would be clearer as an explicit loop over a fixed sequence of turns.
+- ~~**Implicit state machine in `run_match_from_pods()`** (`dispatcher/match_runner.py:56–112`) — a `while True` loop with player-alternation and early returns. The flow would be clearer as an explicit loop over a fixed sequence of turns.~~
 - ~~**Exception for control flow** (`web/submit.py:38–44`) — `_SubmissionError` is raised for expected validation failures, not exceptional conditions. A `Result`-style return or early return with a response would be more idiomatic.~~
 - **`session.commit()` inside `BotRepository.create()`** (`entities/bot/repository.py:88`) — the repository committing removes the caller's ability to batch or roll back. Flush + let the caller commit is the pattern used elsewhere. (Skipped: `get_session()` does not auto-commit on exit, so changing to flush without caller-side commits would break persistence.)
 - **`run_in_executor` wrapping a sync game loop** (`dispatcher/ondeck_handler.py:58–67`) — suggests the game loop could be made async rather than bridged.
 - **Multiple `Bot` aliases in one query** (`entities/bot/repository.py`) — `bx`, `bo`, `bw`, `bw_inner` are all aliased from `Bot` within `leaderboard()`. Combined with the CTE complexity, this is the single hardest function to read in the codebase.
 - **Silent error printing in `reset_db.py`** (`scripts/reset_db.py:96–110`) — kubectl failures print instead of raising, creating inconsistent error semantics with the rest of the script.
 - ~~**Dead/skipped acceptance test** (`tests/acceptance/test_turn_rpc.py:12`) — entire test file skipped with "Old RPC architecture removed; new pipeline acceptance tests TBD". Either replace or delete.~~
-- **Test file organisation** (`tests/test_reset_db.py:69`) — `purge_rabbitmq_queues` tests mixed into a general reset_db file; the comment asks whether they deserve their own file.
-- **Nested `with (` grouping in test helpers** (`tests/test_ondeck_handler.py:96,202`) — multiple `patch` calls stacked in a single `with` block; extracting fixtures or using `pytest.mock.patch` as a decorator would reduce the visual nesting.
+- ~~**Test file organisation** (`tests/test_reset_db.py:69`) — `purge_rabbitmq_queues` tests mixed into a general reset_db file; the comment asks whether they deserve their own file.~~
+- ~~**Nested `with (` grouping in test helpers** (`tests/test_ondeck_handler.py:96,202`) — multiple `patch` calls stacked in a single `with` block; extracting fixtures or using `pytest.mock.patch` as a decorator would reduce the visual nesting.~~

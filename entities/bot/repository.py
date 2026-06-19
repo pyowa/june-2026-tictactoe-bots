@@ -173,6 +173,38 @@ def _lifetime_stats(
     return lifetime_wins, lifetime_losses
 
 
+def _leaderboard_query() -> Any:
+    """Build the full leaderboard SELECT statement."""
+    latest_bot = _latest_bot_cte()
+
+    latest_id = latest_bot.c.id
+    latest_base = latest_bot.c.base_name
+
+    clean_wins, forfeit_wins, draws, losses = _per_version_stats(latest_id)
+    lifetime_wins, lifetime_losses = _lifetime_stats(latest_base, latest_bot)
+
+    stats = (
+        select(
+            latest_bot.c.base_name.label("base_name"),
+            latest_bot.c.versioned_name.label("versioned_name"),
+            latest_bot.c.submitted_at.label("submitted_at"),
+            clean_wins.label("clean_wins"),
+            forfeit_wins.label("forfeit_wins"),
+            draws.label("draws"),
+            losses.label("losses"),
+            lifetime_wins.label("lifetime_wins"),
+            lifetime_losses.label("lifetime_losses"),
+        )
+        .select_from(latest_bot)
+        .cte("stats")
+    )
+
+    return select(stats).order_by(
+        (stats.c.clean_wins + stats.c.forfeit_wins).desc(),
+        stats.c.submitted_at.asc(),
+    )
+
+
 class BotRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -262,42 +294,7 @@ class BotRepository:
             await self._session.commit()
 
     async def leaderboard(self) -> list[Row[Any]]:
-        # Mirror the original raw SQL's structure exactly: two CTEs (latest-version
-        # per family, then the actual latest-bot row) feeding six correlated COUNT
-        # subqueries. Aliased Bot copies stand in for the `bx`, `bo`, `bw` aliases
-        # in the original (Bot used twice in one query — once as the outer "this
-        # family's latest version", once as the joined opponent/winner row in the
-        # lifetime W/L subqueries).
-        latest_bot = _latest_bot_cte()
-
-        latest_id = latest_bot.c.id
-        latest_base = latest_bot.c.base_name
-
-        clean_wins, forfeit_wins, draws, losses = _per_version_stats(latest_id)
-        lifetime_wins, lifetime_losses = _lifetime_stats(latest_base, latest_bot)
-
-        stats = (
-            select(
-                latest_bot.c.base_name.label("base_name"),
-                latest_bot.c.versioned_name.label("versioned_name"),
-                latest_bot.c.submitted_at.label("submitted_at"),
-                clean_wins.label("clean_wins"),
-                forfeit_wins.label("forfeit_wins"),
-                draws.label("draws"),
-                losses.label("losses"),
-                lifetime_wins.label("lifetime_wins"),
-                lifetime_losses.label("lifetime_losses"),
-            )
-            .select_from(latest_bot)
-            .cte("stats")
-        )
-
-        stmt = select(stats).order_by(
-            (stats.c.clean_wins + stats.c.forfeit_wins).desc(),
-            stats.c.submitted_at.asc(),
-        )
-
-        result = await self._session.execute(stmt)
+        result = await self._session.execute(_leaderboard_query())
         return list(result.all())
 
     async def family(self, base_name: str) -> list[Row[Any]]:

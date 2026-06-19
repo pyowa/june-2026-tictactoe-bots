@@ -4,6 +4,7 @@ Game loop using warm pods — one pod per bot, all turns via HTTP.
 All functions are synchronous (called from a thread-pool executor).
 """
 
+import itertools
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import URLError
@@ -114,27 +115,23 @@ def run_match_from_pods(
 
     board: Board = [row[:] for row in EMPTY_BOARD]
     moves: list[Move] = []
-    turns = (
-        _Turn("x", "X", ip_x),
-        _Turn("o", "O", ip_o),
-    )
-    move_number = 0
+    turns = (_Turn("x", "X", ip_x), _Turn("o", "O", ip_o))
 
-    while True:
-        for turn in turns:
-            move_number += 1
-            new_board, forfeit_error = _play_turn(
-                turn.player, turn.symbol, turn.pod_ip,
-                board, move_number, correlation_id, turn_timeout,
+    for move_number, turn in enumerate(
+        itertools.islice(itertools.cycle(turns), 9), start=1
+    ):
+        new_board, forfeit_error = _play_turn(
+            turn.player, turn.symbol, turn.pod_ip,
+            board, move_number, correlation_id, turn_timeout,
+        )
+        if forfeit_error is not None:
+            moves.append(
+                Move(move_number, turn.player, board_to_str(board), forfeit_error)
             )
-            if forfeit_error is not None:
-                moves.append(
-                    Move(move_number, turn.player, board_to_str(board), forfeit_error)
-                )
-                return MatchResult(_forfeit_label(turn.player), moves)
+            return MatchResult(_forfeit_label(turn.player), moves)
 
-            board = new_board  # type: ignore[assignment]
-            moves.append(Move(move_number, turn.player, board_to_str(board)))
-            outcome = check_winner(board)
-            if outcome:
-                return MatchResult(outcome, moves)
+        board = new_board  # type: ignore[assignment]
+        moves.append(Move(move_number, turn.player, board_to_str(board)))
+        outcome = check_winner(board)
+        if outcome:
+            return MatchResult(outcome, moves)
