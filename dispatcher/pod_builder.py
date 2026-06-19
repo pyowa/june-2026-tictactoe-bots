@@ -17,10 +17,12 @@ from db.session import get_session
 from dispatcher.pods import (
     build_bot_pod_manifest,
     get_pod_ip,
+    pod_name,
     wait_for_http_ready,
     wait_for_pod_ready,
 )
 from entities.bot.repository import BotRepository
+from messaging.amqp import parse_amqp_message
 from messaging.contracts import (
     BUILD_POD_QUEUE,
     POD_READY_QUEUE,
@@ -43,10 +45,8 @@ async def handle_build_pod_message(
     core_v1: Any,
 ) -> None:
     async with message.process():
-        try:
-            msg = BuildPodMessage.model_validate_json(message.body)
-        except Exception:
-            _log.error("pod_builder_invalid_json")
+        msg = parse_amqp_message(message.body, BuildPodMessage)
+        if msg is None:
             return
 
         runtime = RUNTIMES.get(msg.runtime_key)
@@ -64,26 +64,26 @@ async def handle_build_pod_message(
             return
 
         source_b64 = base64.b64encode(bot.source or b"").decode("ascii")
-        pod_name = f"bot-{msg.bot_id}"
+        _pod_name = pod_name(msg.bot_id)
 
-        _log.info("pod_building", bot_id=msg.bot_id, pod_name=pod_name)
+        _log.info("pod_building", bot_id=msg.bot_id, pod_name=_pod_name)
 
         loop = asyncio.get_running_loop()
 
         def _build_and_wait() -> None:
             manifest = build_bot_pod_manifest(
-                pod_name, runtime.image, source_b64, msg.bot_id
+                _pod_name, runtime.image, source_b64, msg.bot_id
             )
             core_v1.create_namespaced_pod("bots", body=manifest)
-            wait_for_pod_ready(core_v1, pod_name, timeout=POD_TIMEOUT)
-            pod_ip = get_pod_ip(core_v1, pod_name)
+            wait_for_pod_ready(core_v1, _pod_name, timeout=POD_TIMEOUT)
+            pod_ip = get_pod_ip(core_v1, _pod_name)
             wait_for_http_ready(pod_ip, timeout=POD_TIMEOUT)
 
         await loop.run_in_executor(None, functools.partial(_build_and_wait))
 
         async with get_session() as session:
             bots = BotRepository(session)
-            await bots.set_pod_ready(msg.bot_id, pod_name)
+            await bots.set_pod_ready(msg.bot_id, _pod_name)
 
         await channel.default_exchange.publish(
             aio_pika.Message(
@@ -92,7 +92,7 @@ async def handle_build_pod_message(
             routing_key=POD_READY_QUEUE,
         )
 
-        _log.info("pod_ready", bot_id=msg.bot_id, pod_name=pod_name)
+        _log.info("pod_ready", bot_id=msg.bot_id, pod_name=_pod_name)
 
 
 async def run() -> None:  # pragma: no cover

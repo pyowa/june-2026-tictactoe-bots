@@ -137,6 +137,48 @@ def _success_response(
     return response
 
 
+async def _enqueue_and_log(
+    queue: Queue,
+    new_bot_id: int,
+    runtime_key: str,
+    bot_name: str,
+    python_version: str,
+) -> None:
+    """Enqueue a build-pod job and log the successful upload."""
+    await queue.enqueue_build_pod(
+        BuildPodMessage(bot_id=new_bot_id, runtime_key=runtime_key)
+    )
+    _log.info(
+        "bot_uploaded",
+        bot_name=bot_name,
+        bot_id=new_bot_id,
+        python_version=python_version,
+        runtime_key=runtime_key,
+    )
+
+
+async def _resolve_persist_and_enqueue(
+    bots: BotRepository,
+    queue: Queue,
+    source_bytes: bytes,
+    owned_bots_cookie: str | None,
+    bot_name: str,
+    runtime_key: str,
+) -> tuple[str, dict[str, str], str, list]:
+    """Resolve ownership, persist the bot, enqueue build, and fetch listing.
+
+    Returns ``(versioned_name, owned_map, owner_token, listing)``."""
+    python_version = _python_version_from_runtime_key(runtime_key)
+    owned = parse_cookie(owned_bots_cookie)
+    owner_token = await _resolve_owner_token(bots, bot_name, owned)
+    name, new_bot_id = await _persist_bot(
+        bots, bot_name, owner_token, runtime_key, source_bytes
+    )
+    await _enqueue_and_log(queue, new_bot_id, runtime_key, bot_name, python_version)
+    listing = await bots.list_for_homepage()
+    return name, owned, owner_token, listing
+
+
 async def handle_submission(
     request: Request,
     file: UploadFile,
@@ -150,23 +192,9 @@ async def handle_submission(
     source_bytes = await file.read()
     try:
         bot_name, runtime_key = _validate_source(source_bytes)
-        python_version = _python_version_from_runtime_key(runtime_key)
-        owned = parse_cookie(owned_bots_cookie)
-        owner_token = await _resolve_owner_token(bots, bot_name, owned)
-        name, new_bot_id = await _persist_bot(
-            bots, bot_name, owner_token, runtime_key, source_bytes
+        name, owned, owner_token, listing = await _resolve_persist_and_enqueue(
+            bots, queue, source_bytes, owned_bots_cookie, bot_name, runtime_key
         )
-        await queue.enqueue_build_pod(
-            BuildPodMessage(bot_id=new_bot_id, runtime_key=runtime_key)
-        )
-        _log.info(
-            "bot_uploaded",
-            bot_name=bot_name,
-            bot_id=new_bot_id,
-            python_version=python_version,
-            runtime_key=runtime_key,
-        )
-        listing = await bots.list_for_homepage()
     except _SubmissionError as exc:
         return render_index_response(request, error=exc.message)
 
