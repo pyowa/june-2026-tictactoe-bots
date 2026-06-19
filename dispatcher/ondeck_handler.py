@@ -23,6 +23,32 @@ RABBITMQ_URL = os.environ.get(
 _log = structlog.get_logger()
 
 
+async def _fetch_match_bots(
+    bot_x_id: int, bot_o_id: int
+) -> tuple[Any, Any] | None:
+    """Fetch both bots; validate they exist and have pods. Returns None on failure."""
+    async with get_session() as session:
+        bots = BotRepository(session)
+        bot_map = await bots.by_ids([bot_x_id, bot_o_id])
+
+    bot_x = bot_map.get(bot_x_id)
+    bot_o = bot_map.get(bot_o_id)
+
+    if bot_x is None or bot_o is None:
+        _log.error(
+            "ondeck_handler_bot_not_found", bot_x_id=bot_x_id, bot_o_id=bot_o_id
+        )
+        return None
+
+    if bot_x.pod_name is None or bot_o.pod_name is None:
+        _log.error(
+            "ondeck_handler_bot_has_no_pod", bot_x_id=bot_x_id, bot_o_id=bot_o_id
+        )
+        return None
+
+    return bot_x, bot_o
+
+
 async def handle_match_ondeck(
     message: Any,
     channel: Any,
@@ -35,28 +61,11 @@ async def handle_match_ondeck(
             _log.error("ondeck_handler_invalid_json")
             return
 
-        async with get_session() as session:
-            bots = BotRepository(session)
-            bot_map = await bots.by_ids([msg.bot_x_id, msg.bot_o_id])
-
-        bot_x = bot_map.get(msg.bot_x_id)
-        bot_o = bot_map.get(msg.bot_o_id)
-
-        if bot_x is None or bot_o is None:
-            _log.error(
-                "ondeck_handler_bot_not_found",
-                bot_x_id=msg.bot_x_id,
-                bot_o_id=msg.bot_o_id,
-            )
+        bots_result = await _fetch_match_bots(msg.bot_x_id, msg.bot_o_id)
+        if bots_result is None:
             return
 
-        if bot_x.pod_name is None or bot_o.pod_name is None:
-            _log.error(
-                "ondeck_handler_bot_has_no_pod",
-                bot_x_id=msg.bot_x_id,
-                bot_o_id=msg.bot_o_id,
-            )
-            return
+        bot_x, bot_o = bots_result
 
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
