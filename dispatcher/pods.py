@@ -7,12 +7,21 @@ to avoid blocking the async event loop.
 
 import json
 import time
+from dataclasses import dataclass
 from typing import Any
 from urllib.request import Request, urlopen
+
+
+@dataclass
+class TurnResponse:
+    board: str | None
+    error: str | None
+
 
 NAMESPACE = "bots"
 TURN_PORT = 8080
 _POLL_INTERVAL = 0.5
+_TERMINAL_POD_PHASES = frozenset({"Failed", "Unknown"})
 
 
 def pod_name(bot_id: int) -> str:
@@ -90,7 +99,7 @@ def _check_pod_phase(pod: Any, pod_name: str) -> bool:
     Returns False while the pod is still starting up (caller should keep polling).
     """
     phase = pod.status.phase
-    if phase in ("Failed", "Unknown"):
+    if phase in _TERMINAL_POD_PHASES:
         raise RuntimeError(f"pod {pod_name} entered phase {phase!r}")
     container_statuses = pod.status.container_statuses
     return bool(
@@ -134,13 +143,14 @@ def request_turn(
     board: str,
     *,
     timeout: float = 10.0,
-) -> dict[str, Any]:
-    """POST a turn request to the pod's HTTP server and return the parsed JSON."""
+) -> TurnResponse:
+    """POST a turn request to the pod's HTTP server and return the parsed response."""
     url = f"http://{pod_ip}:{TURN_PORT}/turn"
     body = json.dumps({"symbol": symbol, "board": board}).encode()
     req = Request(url, data=body, headers={"Content-Type": "application/json"})
     with urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read())
+        data = json.loads(resp.read())
+        return TurnResponse(board=data.get("board"), error=data.get("error"))
 
 
 def delete_pod(core_v1: Any, pod_name: str) -> None:

@@ -25,7 +25,46 @@ from messaging.contracts import (
 _log = structlog.get_logger()
 
 
-# TODO smell
+async def _enqueue_matches(channel: Any, bot_id: int, ready_bots: list[Any]) -> int:
+    """Publish MatchOndeck messages for all pairings involving bot_id.
+
+    Returns the number of messages published."""
+    count = 0
+    for other in ready_bots:
+        await channel.default_exchange.publish(
+            aio_pika.Message(
+                body=MatchOndeck(
+                    bot_x_id=bot_id,
+                    bot_o_id=other.id,
+                    correlation_id=secrets.token_hex(16),
+                )
+                .model_dump_json()
+                .encode(),
+                delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+                content_type="application/json",
+            ),
+            routing_key=MATCH_ONDECK_QUEUE,
+        )
+        count += 1
+        if other.id != bot_id:
+            await channel.default_exchange.publish(
+                aio_pika.Message(
+                    body=MatchOndeck(
+                        bot_x_id=other.id,
+                        bot_o_id=bot_id,
+                        correlation_id=secrets.token_hex(16),
+                    )
+                    .model_dump_json()
+                    .encode(),
+                    delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+                    content_type="application/json",
+                ),
+                routing_key=MATCH_ONDECK_QUEUE,
+            )
+            count += 1
+    return count
+
+
 async def handle_pod_ready_message(message: Any, channel: Any) -> None:
     async with message.process():
         try:
@@ -38,40 +77,7 @@ async def handle_pod_ready_message(message: Any, channel: Any) -> None:
             repo = BotRepository(session)
             ready_bots = await repo.ready_bots()
 
-        count = 0
-        for other in ready_bots:
-            await channel.default_exchange.publish(
-                aio_pika.Message(
-                    body=MatchOndeck(
-                        bot_x_id=msg.bot_id,
-                        bot_o_id=other.id,
-                        correlation_id=secrets.token_hex(16),
-                    )
-                    .model_dump_json()
-                    .encode(),
-                    delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
-                    content_type="application/json",
-                ),
-                routing_key=MATCH_ONDECK_QUEUE,
-            )
-            count += 1
-            if other.id != msg.bot_id:
-                await channel.default_exchange.publish(
-                    aio_pika.Message(
-                        body=MatchOndeck(
-                            bot_x_id=other.id,
-                            bot_o_id=msg.bot_id,
-                            correlation_id=secrets.token_hex(16),
-                        )
-                        .model_dump_json()
-                        .encode(),
-                        delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
-                        content_type="application/json",
-                    ),
-                    routing_key=MATCH_ONDECK_QUEUE,
-                )
-                count += 1
-
+        count = await _enqueue_matches(channel, msg.bot_id, ready_bots)
         _log.info("matches_scheduled", bot_id=msg.bot_id, count=count)
 
 

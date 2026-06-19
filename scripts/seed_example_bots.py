@@ -32,8 +32,7 @@ ROOT = Path(__file__).parent.parent
 EXAMPLE_BOTS_DIR = ROOT / "example_bots"
 
 
-# TODO smell
-async def main() -> None:
+async def _clear_tables() -> None:
     async with get_session() as session:
         print("Clearing existing bots, matches, and moves...")
         await session.execute(delete(Move))
@@ -41,11 +40,9 @@ async def main() -> None:
         await session.execute(delete(Bot))
         await session.commit()
 
-    sources = sorted(EXAMPLE_BOTS_DIR.glob("*.py"))
-    if not sources:
-        print(f"No .py files found under {EXAMPLE_BOTS_DIR}")
-        return
 
+async def _insert_bots(sources: list[Path]) -> int:
+    """Insert bots from source files. Returns the number of bots inserted."""
     inserted = 0
     async with get_session() as session:
         bots = BotRepository(session)
@@ -79,7 +76,11 @@ async def main() -> None:
             )
             inserted += 1
             print(f"  {src.name:30s} -> {v_name}")
+    return inserted
 
+
+async def _enqueue_builds() -> int:
+    """Enqueue BuildPodMessage for every bot in the DB. Returns the count."""
     queue = make_queue()
     async with get_session() as session:
         all_bots = await BotRepository(session).all()
@@ -90,6 +91,19 @@ async def main() -> None:
             BuildPodMessage(bot_id=bot.id, runtime_key=bot.runtime_key)
         )
         count += 1
+    return count
+
+
+async def main() -> None:
+    await _clear_tables()
+
+    sources = sorted(EXAMPLE_BOTS_DIR.glob("*.py"))
+    if not sources:
+        print(f"No .py files found under {EXAMPLE_BOTS_DIR}")
+        return
+
+    inserted = await _insert_bots(sources)
+    count = await _enqueue_builds()
 
     print(
         f"\nInserted {inserted} bots, enqueued {count} build-pod jobs to matches.build."

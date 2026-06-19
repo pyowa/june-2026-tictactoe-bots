@@ -11,6 +11,7 @@ from sqlalchemy.orm import aliased, undefer
 
 from entities.bot.model import Bot
 from entities.match.model import Match
+from runner.engine import MatchOutcome
 
 
 def _latest_bot_cte() -> Any:
@@ -60,7 +61,7 @@ def _per_version_stats(
         .select_from(Match)
         .where(
             Match.winner_id == bot_id_expr,
-            Match.result.in_(("x_wins", "o_wins")),
+            Match.result.in_((MatchOutcome.X_WINS, MatchOutcome.O_WINS)),
         )
         .scalar_subquery()
     )
@@ -69,7 +70,7 @@ def _per_version_stats(
         .select_from(Match)
         .where(
             Match.winner_id == bot_id_expr,
-            Match.result.in_(("x_forfeit", "o_forfeit")),
+            Match.result.in_((MatchOutcome.X_FORFEIT, MatchOutcome.O_FORFEIT)),
         )
         .scalar_subquery()
     )
@@ -78,7 +79,7 @@ def _per_version_stats(
         .select_from(Match)
         .where(
             or_(Match.bot_x_id == bot_id_expr, Match.bot_o_id == bot_id_expr),
-            Match.result == "cat",
+            Match.result == MatchOutcome.CAT,
         )
         .scalar_subquery()
     )
@@ -87,7 +88,7 @@ def _per_version_stats(
         .select_from(Match)
         .where(
             or_(Match.bot_x_id == bot_id_expr, Match.bot_o_id == bot_id_expr),
-            Match.result != "cat",
+            Match.result != MatchOutcome.CAT,
             or_(Match.winner_id.is_(None), Match.winner_id != bot_id_expr),
         )
         .scalar_subquery()
@@ -161,7 +162,7 @@ def _lifetime_stats(
         .join(bx, bx.id == Match.bot_x_id)
         .join(bo, bo.id == Match.bot_o_id)
         .where(
-            Match.result != "cat",
+            Match.result != MatchOutcome.CAT,
             or_(bx.base_name == base_name_expr, bo.base_name == base_name_expr),
             or_(bx.base_name != base_name_expr, bo.base_name != base_name_expr),
             or_(Match.winner_id.is_(None), winner_not_in_family),
@@ -269,11 +270,11 @@ class BotRepository:
         # lifetime W/L subqueries).
         latest_bot = _latest_bot_cte()
 
-        lb_id = latest_bot.c.id
-        lb_base = latest_bot.c.base_name
+        latest_id = latest_bot.c.id
+        latest_base = latest_bot.c.base_name
 
-        clean_wins, forfeit_wins, draws, losses = _per_version_stats(lb_id)
-        lifetime_wins, lifetime_losses = _lifetime_stats(lb_base, latest_bot)
+        clean_wins, forfeit_wins, draws, losses = _per_version_stats(latest_id)
+        lifetime_wins, lifetime_losses = _lifetime_stats(latest_base, latest_bot)
 
         stats = (
             select(

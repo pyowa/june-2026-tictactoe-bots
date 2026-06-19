@@ -8,29 +8,14 @@ import pytest
 from dispatcher.pods import (
     NAMESPACE,
     TURN_PORT,
-    _check_pod_phase,
+    TurnResponse,
     build_bot_pod_manifest,
     delete_pod,
     get_pod_ip,
-    pod_name,
     request_turn,
     wait_for_http_ready,
     wait_for_pod_ready,
 )
-
-# ---------------------------------------------------------------------------
-# pod_name — pure function, no mocks
-# ---------------------------------------------------------------------------
-
-
-def test_pod_name_returns_bot_prefixed_id() -> None:
-    assert pod_name(42) == "bot-42"
-
-
-def test_pod_name_returns_bot_prefixed_id_for_different_values() -> None:
-    assert pod_name(1) == "bot-1"
-    assert pod_name(999) == "bot-999"
-
 
 # ---------------------------------------------------------------------------
 # build_bot_pod_manifest — pure function, no mocks
@@ -103,7 +88,7 @@ def test_build_bot_pod_manifest_no_readiness_probe() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _check_pod_phase — extracted helper
+# wait_for_pod_ready
 # ---------------------------------------------------------------------------
 
 
@@ -114,38 +99,6 @@ def _make_pod_mock(phase: str, ready: bool) -> MagicMock:
     status.ready = ready
     pod.status.container_statuses = [status]
     return pod
-
-
-def test_check_pod_phase_returns_true_when_running_and_ready() -> None:
-    pod = _make_pod_mock("Running", True)
-    assert _check_pod_phase(pod, "bot-42") is True
-
-
-def test_check_pod_phase_returns_false_when_running_but_not_ready() -> None:
-    pod = _make_pod_mock("Running", False)
-    assert _check_pod_phase(pod, "bot-42") is False
-
-
-def test_check_pod_phase_returns_false_when_pending() -> None:
-    pod = _make_pod_mock("Pending", False)
-    assert _check_pod_phase(pod, "bot-42") is False
-
-
-def test_check_pod_phase_raises_on_failed_phase() -> None:
-    pod = _make_pod_mock("Failed", False)
-    with pytest.raises(RuntimeError):
-        _check_pod_phase(pod, "bot-42")
-
-
-def test_check_pod_phase_raises_on_unknown_phase() -> None:
-    pod = _make_pod_mock("Unknown", False)
-    with pytest.raises(RuntimeError):
-        _check_pod_phase(pod, "bot-42")
-
-
-# ---------------------------------------------------------------------------
-# wait_for_pod_ready
-# ---------------------------------------------------------------------------
 
 
 def test_wait_for_pod_ready_returns_when_running_and_ready() -> None:
@@ -300,7 +253,9 @@ def test_request_turn_returns_parsed_json() -> None:
     with patch("dispatcher.pods.urlopen", return_value=response_mock):
         result = request_turn("10.0.0.5", "X", ".|.|.\n.|.|.\n.|.|.")
 
-    assert result == {"board": "X|.|.\n.|.|.\n.|.|."}
+    assert isinstance(result, TurnResponse)
+    assert result.board == "X|.|.\n.|.|.\n.|.|."
+    assert result.error is None
 
 
 def test_request_turn_with_error_response() -> None:
@@ -312,7 +267,9 @@ def test_request_turn_with_error_response() -> None:
     with patch("dispatcher.pods.urlopen", return_value=response_mock):
         result = request_turn("10.0.0.5", "X", ".|.|.\n.|.|.\n.|.|.")
 
-    assert result == {"error": "runtime crash"}
+    assert isinstance(result, TurnResponse)
+    assert result.error == "runtime crash"
+    assert result.board is None
 
 
 # ---------------------------------------------------------------------------

@@ -6,6 +6,8 @@ from dispatcher.match_runner import (
     _forfeit_label,
     run_match_from_pods,
 )
+from dispatcher.pods import TurnResponse
+from runner.engine import MatchOutcome
 
 # ---------------------------------------------------------------------------
 # _forfeit_label — pure function
@@ -13,11 +15,11 @@ from dispatcher.match_runner import (
 
 
 def test_forfeit_label_x() -> None:
-    assert _forfeit_label("x") == "x_forfeit"
+    assert _forfeit_label("x") == MatchOutcome.X_FORFEIT
 
 
 def test_forfeit_label_o() -> None:
-    assert _forfeit_label("o") == "o_forfeit"
+    assert _forfeit_label("o") == MatchOutcome.O_FORFEIT
 
 
 # ---------------------------------------------------------------------------
@@ -56,15 +58,15 @@ def _patch_pods_from_names(
 def test_run_match_from_pods_x_wins() -> None:
     core_v1 = _make_core_v1()
     turns = [
-        {"board": "X|.|.\n.|.|.\n.|.|."},   # X
-        {"board": "X|.|.\n.|O|.\n.|.|."},   # O
-        {"board": "X|X|.\n.|O|.\n.|.|."},   # X
-        {"board": "X|X|.\n.|O|.\n.|.|O"},   # O
-        {"board": "X|X|X\n.|O|.\n.|.|O"},   # X wins
+        TurnResponse(board="X|.|.\n.|.|.\n.|.|.", error=None),   # X
+        TurnResponse(board="X|.|.\n.|O|.\n.|.|.", error=None),   # O
+        TurnResponse(board="X|X|.\n.|O|.\n.|.|.", error=None),   # X
+        TurnResponse(board="X|X|.\n.|O|.\n.|.|O", error=None),   # O
+        TurnResponse(board="X|X|X\n.|O|.\n.|.|O", error=None),   # X wins
     ]
     with _patch_pods_from_names(turns):
         result = run_match_from_pods(core_v1, "pod-x", "pod-o", "cid-fp-x")
-    assert result.result == "x_wins"
+    assert result.result == MatchOutcome.X_WINS
     assert len(result.moves) == 5
 
 
@@ -73,16 +75,16 @@ def test_run_match_from_pods_o_wins() -> None:
     # O wins middle column: O takes [0][1], [1][1], [2][1]
     # X is forced to play elsewhere without winning
     turns = [
-        {"board": "X|.|.\n.|.|.\n.|.|."},      # X move 1: X at [0][0]
-        {"board": "X|O|.\n.|.|.\n.|.|."},      # O move 1: O at [0][1]
-        {"board": "X|O|X\n.|.|.\n.|.|."},      # X move 2: X at [0][2]
-        {"board": "X|O|X\n.|O|.\n.|.|."},      # O move 2: O at [1][1]
-        {"board": "X|O|X\n.|O|X\n.|.|."},      # X move 3: X at [1][2] (no win)
-        {"board": "X|O|X\n.|O|X\n.|O|."},      # O move 3: O at [2][1] — wins col 1
+        TurnResponse(board="X|.|.\n.|.|.\n.|.|.", error=None),   # X move 1: [0][0]
+        TurnResponse(board="X|O|.\n.|.|.\n.|.|.", error=None),   # O move 1: [0][1]
+        TurnResponse(board="X|O|X\n.|.|.\n.|.|.", error=None),   # X move 2: [0][2]
+        TurnResponse(board="X|O|X\n.|O|.\n.|.|.", error=None),   # O move 2: [1][1]
+        TurnResponse(board="X|O|X\n.|O|X\n.|.|.", error=None),   # X move 3: [1][2]
+        TurnResponse(board="X|O|X\n.|O|X\n.|O|.", error=None),   # O move 3: [2][1] wins
     ]
     with _patch_pods_from_names(turns):
         result = run_match_from_pods(core_v1, "pod-x", "pod-o", "cid-fp-o")
-    assert result.result == "o_wins"
+    assert result.result == MatchOutcome.O_WINS
 
 
 def test_run_match_from_pods_draw() -> None:
@@ -98,10 +100,10 @@ def test_run_match_from_pods_draw() -> None:
         "X|O|X\nX|O|O\nO|.|X",
         "X|O|X\nX|O|O\nO|X|X",
     ]
-    turns = [{"board": b} for b in boards]
+    turns = [TurnResponse(board=b, error=None) for b in boards]
     with _patch_pods_from_names(turns):
         result = run_match_from_pods(core_v1, "pod-x", "pod-o", "cid-fp-draw")
-    assert result.result == "cat"
+    assert result.result == MatchOutcome.CAT
     assert len(result.moves) == 9
 
 
@@ -112,19 +114,19 @@ def test_run_match_from_pods_x_forfeits_on_http_error() -> None:
     turns = [URLError("connection refused")]
     with _patch_pods_from_names(turns):
         result = run_match_from_pods(core_v1, "pod-x", "pod-o", "cid-fp-xe")
-    assert result.result == "x_forfeit"
+    assert result.result == MatchOutcome.X_FORFEIT
     assert result.moves[-1].error is not None
 
 
 def test_run_match_from_pods_o_forfeits_on_invalid_board() -> None:
     core_v1 = _make_core_v1()
     turns = [
-        {"board": "X|.|.\n.|.|.\n.|.|."},   # X valid
-        {"board": "not-a-board"},            # O returns garbage
+        TurnResponse(board="X|.|.\n.|.|.\n.|.|.", error=None),   # X valid
+        TurnResponse(board="not-a-board", error=None),            # O returns garbage
     ]
     with _patch_pods_from_names(turns):
         result = run_match_from_pods(core_v1, "pod-x", "pod-o", "cid-fp-oe")
-    assert result.result == "o_forfeit"
+    assert result.result == MatchOutcome.O_FORFEIT
     assert "unparseable" in (result.moves[-1].error or "")
 
 
