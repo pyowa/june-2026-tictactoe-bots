@@ -356,17 +356,30 @@ def test_upload_logs_bot_uploaded_event(client, mock_queue) -> None:
 
 
 # ---------------------------------------------------------------------------
-# _SubmissionError — base class wiring
+# _validate_bot_name — unit tests
 # ---------------------------------------------------------------------------
 
 
-def test_submission_error_str_repr_equals_message() -> None:
-    """_SubmissionError must pass message to super().__init__ so str(exc) works."""
-    from web.submit import _SubmissionError
+def test_validate_bot_name_returns_none_for_valid_name() -> None:
+    from web.submit import _validate_bot_name
 
-    exc = _SubmissionError("test message")
-    assert exc.args == ("test message",)
-    assert str(exc) == "test message"
+    assert _validate_bot_name("MyBot") is None
+
+
+def test_validate_bot_name_returns_error_for_none() -> None:
+    from web.submit import _validate_bot_name
+
+    err = _validate_bot_name(None)
+    assert err is not None
+    assert "docstring" in err
+
+
+def test_validate_bot_name_returns_error_for_reserved_suffix() -> None:
+    from web.submit import _validate_bot_name
+
+    err = _validate_bot_name("FooV9")
+    assert err is not None
+    assert "reserved for auto-versioning" in err
 
 
 # ---------------------------------------------------------------------------

@@ -1,10 +1,9 @@
 """POST /submit handler — extracted so `web/main.py` stays a thin route table.
 
 The public surface is one async function, `handle_submission`. Internally
-the flow is split into small steps; failed validation in any step raises
-`_SubmissionError`, which the top-level handler converts into a rendered
-error response. Happy-path code therefore reads top-to-bottom with no
-sentinel returns."""
+the flow is split into small steps; each validation helper returns a
+user-facing error string on failure or `None` on success. Happy-path code
+reads top-to-bottom with early returns on error."""
 
 import re
 import secrets
@@ -43,58 +42,39 @@ class _OwnerContext:
     bot_name: str
 
 
-class _SubmissionError(Exception):
-    """Raised inside the submission flow when a step should short-circuit to
-    an error render. The `message` attribute is the user-facing string."""
-
-    def __init__(self, message: str) -> None:
-        super().__init__(message)
-        self.message = message
-
-
-def _validate_source(source_bytes: bytes) -> tuple[str, str]:
-    """Decode + validate the uploaded source.
-
-    Returns `(bot_name, runtime_key)`. Raises `_SubmissionError` if the
-    docstring is missing the `name:` field or the declared runtime is
-    unsupported."""
-    source = source_bytes.decode("utf-8", errors="replace")  # pragma: no mutate
-
-    bot_name = extract_bot_name(source)
+def _validate_bot_name(bot_name: str | None) -> str | None:
+    """Return an error string if the bot name is missing or reserved, else None."""
     if not bot_name:
-        raise _SubmissionError(
-            "Your bot must start with a docstring containing 'name: <name>'."
-        )
-
+        return "Your bot must start with a docstring containing 'name: <name>'."
     if _RESERVED_VERSION_SUFFIX.search(bot_name):
-        raise _SubmissionError(
+        return (
             f"Bot name '{bot_name}' ends in 'V<digits>', which is "
             "reserved for auto-versioning. Pick a different name."
         )
+    return None
 
-    runtime_key = extract_runtime_key(source)
+
+def _validate_runtime_key(runtime_key: str | None) -> str | None:
+    """Return an error string if the runtime key is missing, else None."""
     if runtime_key is None:
-        raise _SubmissionError(
+        return (
             "Invalid runtime in docstring. Use 'language: python-3.13' "
             "or 'python: 3.13'."
         )
-
-    return bot_name, runtime_key
+    return None
 
 
 async def _resolve_owner_token(
     bots: BotRepository, bot_name: str, owned: dict[str, str]
-) -> str:
-    """Return the owner token to use for this submission. Raises
-    `_SubmissionError` if the name is owned by someone whose cookie doesn't
-    match. Mints a fresh token when the name is unclaimed."""
+) -> tuple[str | None, str | None]:
+    """Return (owner_token, error). On name collision returns (None, error_msg)."""
     existing_token = await bots.owner_token(bot_name)
     if existing_token:
         if owned.get(bot_name) != existing_token:
-            raise _SubmissionError(f"'{bot_name}' is already taken by someone else.")
-        return existing_token
+            return None, f"'{bot_name}' is already taken by someone else."
+        return existing_token, None
 
-    return secrets.token_hex(32)  # pragma: no mutate -- token_hex(None) is equivalent
+    return secrets.token_hex(32), None  # pragma: no mutate -- token_hex(None) is equiv
 
 
 async def _persist_bot(
@@ -154,27 +134,41 @@ async def handle_submission(
     validates it, persists the bot, enqueues match jobs, and renders either
     a success or error page."""
     source_bytes = await file.read()
-    try:
-        bot_name, runtime_key = _validate_source(source_bytes)
-        python_version = _python_version_from_runtime_key(runtime_key)
-        owned = parse_cookie(owned_bots_cookie)
-        owner_token = await _resolve_owner_token(bots, bot_name, owned)
-        name, new_bot_id = await _persist_bot(
-            bots, bot_name, owner_token, runtime_key, source_bytes
-        )
-        await queue.enqueue_build_pod(
-            BuildPodMessage(bot_id=new_bot_id, runtime_key=runtime_key)
-        )
-        _log.info(
-            "bot_uploaded",
-            bot_name=bot_name,
-            bot_id=new_bot_id,
-            python_version=python_version,
-            runtime_key=runtime_key,
-        )
-        listing = await bots.list_for_homepage()
-    except _SubmissionError as exc:
-        return render_index_response(request, error=exc.message)
+    source = source_bytes.decode("utf-8", errors="replace")  # pragma: no mutate
+
+    bot_name = extract_bot_name(source)
+    if err := _validate_bot_name(bot_name):
+        return render_index_response(request, error=err)
+
+    runtime_key = extract_runtime_key(source)
+    if err := _validate_runtime_key(runtime_key):
+        return render_index_response(request, error=err)
+
+    assert bot_name is not None  # narrowed above
+    assert runtime_key is not None  # narrowed above
+
+    python_version = _python_version_from_runtime_key(runtime_key)
+    owned = parse_cookie(owned_bots_cookie)
+    owner_token, err = await _resolve_owner_token(bots, bot_name, owned)
+    if err:
+        return render_index_response(request, error=err)
+
+    assert owner_token is not None  # narrowed above
+
+    name, new_bot_id = await _persist_bot(
+        bots, bot_name, owner_token, runtime_key, source_bytes
+    )
+    await queue.enqueue_build_pod(
+        BuildPodMessage(bot_id=new_bot_id, runtime_key=runtime_key)
+    )
+    _log.info(
+        "bot_uploaded",
+        bot_name=bot_name,
+        bot_id=new_bot_id,
+        python_version=python_version,
+        runtime_key=runtime_key,
+    )
+    listing = await bots.list_for_homepage()
 
     return _success_response(
         request,
