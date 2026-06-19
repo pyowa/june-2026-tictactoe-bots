@@ -30,8 +30,8 @@ Candidate refactoring targets. Ordered roughly by severity within each section.
 | ~~`dispatcher/match_runner.py:34`~~ | ~~`run_match_from_pods()`~~ | ~~79~~ | ~~Game loop + error classification + move recording~~ |
 | ~~`dispatcher/pod_builder.py:54`~~ | ~~`handle_build_pod_message()`~~ | ~~58~~ | ~~See "functions doing too many things"~~ |
 | ~~`scripts/reset_db.py:36`~~ | ~~`purge_rabbitmq_queues()`~~ | ~~42~~ | ~~HTTP auth, queue listing, filtering, URL encoding, deletion~~ |
-| `web/submit.py:140` | `handle_submission()` | 34 | See "functions doing too many things" |
-| `dispatcher/pods.py:80` | `wait_for_pod_ready()` | 26 | Polling loop with nested exception handling |
+| ~~`web/submit.py:140`~~ | ~~`handle_submission()`~~ | ~~34~~ | ~~See "functions doing too many things"~~ |
+| ~~`dispatcher/pods.py:80`~~ | ~~`wait_for_pod_ready()`~~ | ~~26~~ | ~~Polling loop with nested exception handling~~ |
 
 ---
 
@@ -59,8 +59,8 @@ Candidate refactoring targets. Ordered roughly by severity within each section.
 ## Duplication
 
 - ~~**Stats subquery pattern** — `clean_wins`, `forfeit_wins`, `draws`, `losses` are each built as a correlated scalar subquery. The same pattern appears once in `leaderboard()` (lines 141–176) and again in `family()` (lines 268–303) — 8 nearly-identical COUNT subqueries total. A helper that builds the subquery given the filter arguments could collapse this significantly.~~
-- **Message JSON validation** — `dispatcher/pod_builder.py:61` and `dispatcher/ondeck_handler.py:30` both do identical `try: model_validate_json() / except: nack` blocks.
-- **Pod name construction** — `f"bot-{msg.bot_id}"` appears in both `pod_builder.py` and `match_runner.py`.
+- ~~**Message JSON validation** — `dispatcher/pod_builder.py:61` and `dispatcher/ondeck_handler.py:30` both do identical `try: model_validate_json() / except: nack` blocks.~~
+- ~~**Pod name construction** — `f"bot-{msg.bot_id}"` appears in both `pod_builder.py` and `match_runner.py`.~~
 
 ---
 
