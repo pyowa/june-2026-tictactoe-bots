@@ -15,6 +15,12 @@ TURN_PORT = 8080
 _POLL_INTERVAL = 0.5
 
 
+def pod_name(bot_id: int) -> str:
+    """Return the Kubernetes pod name for a given bot ID."""
+    return f"bot-{bot_id}"
+
+
+
 def build_bot_pod_manifest(
     pod_name: str,
     image: str,
@@ -77,7 +83,22 @@ def wait_for_http_ready(
     raise TimeoutError(f"pod at {pod_ip} not ready after {timeout}s")
 
 
-# TODO smell
+def _check_pod_phase(pod: Any, pod_name: str) -> bool:
+    """Inspect *pod* status and return True if the pod is ready to serve traffic.
+
+    Raises RuntimeError immediately if the pod entered a terminal failure phase.
+    Returns False while the pod is still starting up (caller should keep polling).
+    """
+    phase = pod.status.phase
+    if phase in ("Failed", "Unknown"):
+        raise RuntimeError(f"pod {pod_name} entered phase {phase!r}")
+    container_statuses = pod.status.container_statuses
+    return bool(
+        phase == "Running" and container_statuses and container_statuses[0].ready
+    )
+
+
+
 def wait_for_pod_ready(
     core_v1: Any,
     pod_name: str,
@@ -92,15 +113,7 @@ def wait_for_pod_ready(
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         pod = core_v1.read_namespaced_pod(pod_name, NAMESPACE)
-        phase = pod.status.phase
-        if phase in ("Failed", "Unknown"):
-            raise RuntimeError(f"pod {pod_name} entered phase {phase!r}")
-        container_statuses = pod.status.container_statuses
-        if (
-            phase == "Running"
-            and container_statuses
-            and container_statuses[0].ready
-        ):
+        if _check_pod_phase(pod, pod_name):
             return
         time.sleep(_POLL_INTERVAL)
     raise TimeoutError(f"pod {pod_name} not ready after {timeout}s")

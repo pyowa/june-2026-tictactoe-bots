@@ -14,6 +14,7 @@ from db.session import get_session
 from dispatcher.match_runner import run_match_from_pods
 from entities.bot.repository import BotRepository
 from entities.match.repository import MatchRepository
+from messaging.amqp import parse_amqp_message
 from messaging.client import BROKER_URL
 from messaging.contracts import MATCH_ONDECK_QUEUE, MatchOndeck
 
@@ -27,10 +28,8 @@ async def handle_match_ondeck(
     core_v1: Any,
 ) -> None:
     async with message.process():
-        try:
-            msg = MatchOndeck.model_validate_json(message.body)
-        except Exception:
-            _log.error("ondeck_handler_invalid_json")
+        msg = parse_amqp_message(message.body, MatchOndeck)
+        if msg is None:
             return
 
         async with get_session() as session:

@@ -17,11 +17,13 @@ from db.session import get_session
 from dispatcher.pods import (
     build_bot_pod_manifest,
     get_pod_ip,
+    pod_name as make_pod_name,
     wait_for_http_ready,
     wait_for_pod_ready,
 )
 from entities.bot.model import Bot
 from entities.bot.repository import BotRepository
+from messaging.amqp import parse_amqp_message
 from messaging.client import BROKER_URL
 from messaging.contracts import (
     BUILD_POD_QUEUE,
@@ -67,26 +69,26 @@ async def _build_register_and_notify(
 ) -> None:
     """Pod build + set_pod_ready DB update + publish PodReadyMessage."""
     source_b64 = base64.b64encode(bot.source or b"").decode("ascii")
-    pod_name = f"bot-{bot.id}"
+    pname = make_pod_name(bot.id)
 
-    _log.info("pod_building", bot_id=bot.id, pod_name=pod_name)
+    _log.info("pod_building", bot_id=bot.id, pod_name=pname)
 
     loop = asyncio.get_running_loop()
 
     def _build_and_wait() -> None:
         manifest = build_bot_pod_manifest(
-            pod_name, runtime.image, source_b64, bot.id
+            pname, runtime.image, source_b64, bot.id
         )
         core_v1.create_namespaced_pod("bots", body=manifest)
-        wait_for_pod_ready(core_v1, pod_name, timeout=POD_TIMEOUT)
-        pod_ip = get_pod_ip(core_v1, pod_name)
+        wait_for_pod_ready(core_v1, pname, timeout=POD_TIMEOUT)
+        pod_ip = get_pod_ip(core_v1, pname)
         wait_for_http_ready(pod_ip, timeout=POD_TIMEOUT)
 
     await loop.run_in_executor(None, functools.partial(_build_and_wait))
 
     async with get_session() as session:
         bots = BotRepository(session)
-        await bots.set_pod_ready(bot.id, pod_name)
+        await bots.set_pod_ready(bot.id, pname)
 
     await channel.default_exchange.publish(
         aio_pika.Message(
@@ -96,7 +98,7 @@ async def _build_register_and_notify(
         routing_key=POD_READY_QUEUE,
     )
 
-    _log.info("pod_ready", bot_id=bot.id, pod_name=pod_name)
+    _log.info("pod_ready", bot_id=bot.id, pod_name=pname)
 
 
 
@@ -106,10 +108,8 @@ async def handle_build_pod_message(
     core_v1: Any,
 ) -> None:
     async with message.process():
-        try:
-            msg = BuildPodMessage.model_validate_json(message.body)
-        except Exception:
-            _log.error("pod_builder_invalid_json")
+        msg = parse_amqp_message(message.body, BuildPodMessage)
+        if msg is None:
             return
 
         result = await _fetch_bot_and_runtime(msg)
