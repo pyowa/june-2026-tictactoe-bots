@@ -91,6 +91,7 @@ async def _build_register_and_notify(
     await channel.default_exchange.publish(
         aio_pika.Message(
             body=PodReadyMessage(bot_id=bot.id).model_dump_json().encode(),
+            delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
         ),
         routing_key=POD_READY_QUEUE,
     )

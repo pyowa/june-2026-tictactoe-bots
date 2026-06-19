@@ -39,10 +39,10 @@ Candidate refactoring targets. Ordered roughly by severity within each section.
 
 | File | Lines | Depth | Pattern |
 |------|-------|-------|---------|
-| `entities/bot/repository.py:213` | 213–235 | 5 | SELECT within SELECT within WHERE with OR chains |
-| `dispatcher/match_runner.py:56` | 56–112 | 4 | `while True` → player turns → `try/except` → conditionals |
-| `scripts/reset_db.py:36` | 36–77 | 4 | `for queues` → `if not amq` → `try/except` → error code check |
-| `dispatcher/pod_builder.py:54` | 54–111 | 4 | `async with` → `try/except` → null checks → repo calls |
+| ~~`entities/bot/repository.py:213`~~ | ~~213–235~~ | ~~5~~ | ~~SELECT within SELECT within WHERE with OR chains~~ |
+| ~~`dispatcher/match_runner.py:56`~~ | ~~56–112~~ | ~~4~~ | ~~`while True` → player turns → `try/except` → conditionals~~ |
+| ~~`scripts/reset_db.py:36`~~ | ~~36–77~~ | ~~4~~ | ~~`for queues` → `if not amq` → `try/except` → error code check~~ |
+| ~~`dispatcher/pod_builder.py:54`~~ | ~~54–111~~ | ~~4~~ | ~~`async with` → `try/except` → null checks → repo calls~~ |
 
 ---
 

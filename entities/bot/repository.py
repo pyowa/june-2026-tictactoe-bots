@@ -126,7 +126,11 @@ def _lifetime_stats(
         .join(bw, bw.id == Match.winner_id)
         .where(
             bw.base_name == base_name_expr,
-            or_(bx.base_name != base_name_expr, bo.base_name != base_name_expr),
+            or_(
+                Match.bot_x_id == Match.bot_o_id,
+                bx.base_name != base_name_expr,
+                bo.base_name != base_name_expr,
+            ),
         )
         .scalar_subquery()
     )

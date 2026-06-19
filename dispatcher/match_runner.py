@@ -31,6 +31,19 @@ def _forfeit_label(player: str) -> str:
     return "x_forfeit" if player == "x" else "o_forfeit"
 
 
+def _forfeit(
+    correlation_id: str, move_number: int, error: str
+) -> tuple[None, str]:
+    _log.info(
+        "turn_result",
+        correlation_id=correlation_id,
+        move_number=move_number,
+        outcome="forfeit",
+        error=error,
+    )
+    return None, error
+
+
 def _play_turn(
     player: str,
     symbol: str,
@@ -48,36 +61,23 @@ def _play_turn(
         symbol=symbol,
     )
 
-    forfeit_error: str | None = None
-
     try:
         response = request_turn(pod_ip, symbol, board_to_str(board), timeout=timeout)
         error = response.get("error")
         new_board_text = response.get("board")
         if error or not new_board_text:
-            forfeit_error = error or "no output"
-        else:
-            new_board = parse_board(new_board_text)
-            if new_board is None:
-                forfeit_error = (
-                    f"invalid output: unparseable board: {new_board_text!r}"
-                )
-            else:
-                move_error = validate_move(board, new_board, symbol)
-                if move_error:
-                    forfeit_error = move_error
+            return _forfeit(correlation_id, move_number, error or "no output")
+        new_board = parse_board(new_board_text)
+        if new_board is None:
+            return _forfeit(
+                correlation_id, move_number,
+                f"invalid output: unparseable board: {new_board_text!r}",
+            )
+        move_error = validate_move(board, new_board, symbol)
+        if move_error:
+            return _forfeit(correlation_id, move_number, move_error)
     except URLError as exc:
-        forfeit_error = f"HTTP error: {exc}"
-
-    if forfeit_error is not None:
-        _log.info(
-            "turn_result",
-            correlation_id=correlation_id,
-            move_number=move_number,
-            outcome="forfeit",
-            error=forfeit_error,
-        )
-        return None, forfeit_error
+        return _forfeit(correlation_id, move_number, f"HTTP error: {exc}")
 
     _log.info(
         "turn_result",
