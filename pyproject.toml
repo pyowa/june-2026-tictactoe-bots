@@ -60,7 +60,7 @@ ignore = ["ANN401"]
 [tool.pytest.ini_options]
 addopts = "--cov=web --cov=db --cov=entities --cov=runner --cov=messaging --cov=scripts --cov-report=term-missing --ignore=tests/acceptance"
 asyncio_mode = "auto"
-norecursedirs = ["mutants"]
+norecursedirs = ["mutants", ".claude"]
 # Needed for mutmut: it runs pytest from /app/mutants/ where dispatcher,
 # match_scheduler etc. aren't on sys.path. This adds /app explicitly.
 pythonpath = ["/app"]
