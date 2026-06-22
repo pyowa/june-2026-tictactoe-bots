@@ -135,9 +135,7 @@ async def test_by_ids_returns_bots_keyed_by_id(
     assert result[id_b].base_name == "BotB"
 
 
-async def test_match_record_persists_win(
-    engine: AsyncEngine, _bound_db: None
-) -> None:
+async def test_match_record_persists_win(engine: AsyncEngine, _bound_db: None) -> None:
     bot_x = await db_insert_bot(engine, "BotX")
     bot_o = await db_insert_bot(engine, "BotO")
     factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -170,9 +168,7 @@ async def test_match_record_persists_o_wins(
     assert row.winner_id == bot_o
 
 
-async def test_match_record_persists_draw(
-    engine: AsyncEngine, _bound_db: None
-) -> None:
+async def test_match_record_persists_draw(engine: AsyncEngine, _bound_db: None) -> None:
     bot_x = await db_insert_bot(engine, "DrawX")
     bot_o = await db_insert_bot(engine, "DrawO")
     factory = async_sessionmaker(engine, expire_on_commit=False)

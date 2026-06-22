@@ -23,17 +23,13 @@ from dispatcher.pods import (
 
 
 def test_build_bot_pod_manifest_kind_and_api_version() -> None:
-    m = build_bot_pod_manifest(
-        "bot-42", "pyowa/bot-runner-python:3.14", "c3Jj", 42
-    )
+    m = build_bot_pod_manifest("bot-42", "pyowa/bot-runner-python:3.14", "c3Jj", 42)
     assert m["apiVersion"] == "v1"
     assert m["kind"] == "Pod"
 
 
 def test_build_bot_pod_manifest_metadata() -> None:
-    m = build_bot_pod_manifest(
-        "bot-42", "pyowa/bot-runner-python:3.14", "c3Jj", 42
-    )
+    m = build_bot_pod_manifest("bot-42", "pyowa/bot-runner-python:3.14", "c3Jj", 42)
     assert m["metadata"]["name"] == "bot-42"
     assert m["metadata"]["namespace"] == NAMESPACE
     assert m["metadata"]["labels"]["app"] == "bot-runner"

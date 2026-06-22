@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from fastapi import Request
 
-from web.templates import not_found, render_index_response
+from web.templates import not_found, render_submit_response
 
 
 def _mock_request() -> MagicMock:
@@ -15,24 +15,32 @@ def _mock_request() -> MagicMock:
 
 
 # ---------------------------------------------------------------------------
-# render_index_response — "bots" key must be present and start empty
+# render_submit_response — passes ctx through unchanged.
 # ---------------------------------------------------------------------------
 
 
-def test_render_index_response_context_has_bots_key() -> None:
+def test_render_submit_response_passes_ctx_through() -> None:
     with patch("web.templates.templates") as mock_templates:
         mock_templates.TemplateResponse = MagicMock()
-        render_index_response(_mock_request())
+        render_submit_response(_mock_request(), success="ok!")
     context = mock_templates.TemplateResponse.call_args[0][2]
-    assert "bots" in context
+    assert context == {"success": "ok!"}
 
 
-def test_render_index_response_bots_starts_empty() -> None:
+def test_render_submit_response_empty_ctx_is_empty_dict() -> None:
     with patch("web.templates.templates") as mock_templates:
         mock_templates.TemplateResponse = MagicMock()
-        render_index_response(_mock_request())
+        render_submit_response(_mock_request())
     context = mock_templates.TemplateResponse.call_args[0][2]
-    assert context["bots"] == []
+    assert context == {}
+
+
+def test_render_submit_response_targets_submit_template() -> None:
+    with patch("web.templates.templates") as mock_templates:
+        mock_templates.TemplateResponse = MagicMock()
+        render_submit_response(_mock_request())
+    template_name = mock_templates.TemplateResponse.call_args[0][1]
+    assert template_name == "submit.html"
 
 
 # ---------------------------------------------------------------------------

@@ -41,9 +41,7 @@ def _forfeit_label(player: str) -> MatchOutcome:
     return MatchOutcome.X_FORFEIT if player == "x" else MatchOutcome.O_FORFEIT
 
 
-def _forfeit(
-    correlation_id: str, move_number: int, error: str
-) -> tuple[None, str]:
+def _forfeit(correlation_id: str, move_number: int, error: str) -> tuple[None, str]:
     _log.info(
         "turn_result",
         correlation_id=correlation_id,
@@ -80,7 +78,8 @@ def _play_turn(
         new_board = parse_board(new_board_text)
         if new_board is None:
             return _forfeit(
-                correlation_id, move_number,
+                correlation_id,
+                move_number,
                 f"invalid output: unparseable board: {new_board_text!r}",
             )
         move_error = validate_move(board, new_board, symbol)
@@ -96,7 +95,6 @@ def _play_turn(
         outcome="valid",
     )
     return new_board, None  # type: ignore[return-value]
-
 
 
 def run_match_from_pods(
@@ -121,8 +119,13 @@ def run_match_from_pods(
         itertools.islice(itertools.cycle(turns), 9), start=1
     ):
         new_board, forfeit_error = _play_turn(
-            turn.player, turn.symbol, turn.pod_ip,
-            board, move_number, correlation_id, turn_timeout,
+            turn.player,
+            turn.symbol,
+            turn.pod_ip,
+            board,
+            move_number,
+            correlation_id,
+            turn_timeout,
         )
         if forfeit_error is not None:
             moves.append(

@@ -17,9 +17,11 @@ from db.session import get_session
 from dispatcher.pods import (
     build_bot_pod_manifest,
     get_pod_ip,
-    pod_name as make_pod_name,
     wait_for_http_ready,
     wait_for_pod_ready,
+)
+from dispatcher.pods import (
+    pod_name as make_pod_name,
 )
 from entities.bot.model import Bot
 from entities.bot.repository import BotRepository
@@ -76,9 +78,7 @@ async def _build_register_and_notify(
     loop = asyncio.get_running_loop()
 
     def _build_and_wait() -> None:
-        manifest = build_bot_pod_manifest(
-            pname, runtime.image, source_b64, bot.id
-        )
+        manifest = build_bot_pod_manifest(pname, runtime.image, source_b64, bot.id)
         core_v1.create_namespaced_pod("bots", body=manifest)
         wait_for_pod_ready(core_v1, pname, timeout=POD_TIMEOUT)
         pod_ip = get_pod_ip(core_v1, pname)
@@ -99,7 +99,6 @@ async def _build_register_and_notify(
     )
 
     _log.info("pod_ready", bot_id=bot.id, pod_name=pname)
-
 
 
 async def handle_build_pod_message(
@@ -123,7 +122,10 @@ async def handle_build_pod_message(
 async def run() -> None:  # pragma: no cover
     from kubernetes import client, config
 
+    from db.session import session_factory
+    from messaging.health import make_health_echo_handler
     from messaging.log import configure_logging
+    from messaging.rpc_server import serve_rpc
 
     configure_logging()
     try:
@@ -137,9 +139,17 @@ async def run() -> None:  # pragma: no cover
     channel = await connection.channel()
     queue = await channel.declare_queue(BUILD_POD_QUEUE, durable=True)
 
-    async with queue.iterator() as it:
-        async for message in it:
-            await handle_build_pod_message(message, channel, core_v1)
+    echo_handler = make_health_echo_handler(session_factory, channel, POD_READY_QUEUE)
+
+    async def consume() -> None:
+        async with queue.iterator() as it:
+            async for message in it:
+                await handle_build_pod_message(message, channel, core_v1)
+
+    await asyncio.gather(
+        consume(),
+        serve_rpc(channel, "health.dispatcher.pod-builder", echo_handler),
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover

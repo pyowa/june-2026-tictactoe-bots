@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="card">
+    <h2>Submit Your Bot</h2>
+
+    {% if error %}
+    <div class="banner banner-error">{{ error }}</div>
+    {% endif %}
+    {% if success %}
+    <div class="banner banner-success">{{ success }}</div>
+    {% endif %}
+
+    <p>
+        Upload a <code>.py</code> file. Your bot must begin with a docstring
+        containing a <code>name:</code> field. Optionally specify a Python
+        version (defaults to <code>3</code>). See the
+        <a href="/">Getting Started</a> page for the bot contract and example
+        tests.
+    </p>
+
+    <form method="post" action="/submit" enctype="multipart/form-data">
+        <label for="file">Bot script (.py)</label>
+        <input id="file" type="file" name="file" accept=".py" required>
+        <button type="submit">Submit Bot</button>
+    </form>
+</section>
+
+{% endblock %}

@@ -35,6 +35,7 @@ def make_amqp_message(body: bytes) -> MagicMock:
     msg.process.return_value.__aexit__ = AsyncMock(return_value=None)
     return msg
 
+
 BOT_TEMPLATE = '"""\nname: {name}\n"""\nimport sys\n'
 
 

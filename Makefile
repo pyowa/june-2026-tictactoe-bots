@@ -26,7 +26,7 @@ format:
 	uv run ruff format .
 
 typecheck:
-	uv run ty check web/ db/ entities/ runner/ messaging/ scripts/ tests/
+	uv run ty check web/*.py db/ entities/ runner/ messaging/ scripts/ tests/
 
 check: lint lint-md lint-k8s typecheck test
 
@@ -56,6 +56,10 @@ kind-up: build-images
 	echo "Waiting for rabbitmq to be ready..."
 	kubectl rollout status deployment/rabbitmq -n platform --timeout=180s
 	$(MAKE) kind-load
+	echo "Waiting for app deployments to be ready..."
+	kubectl rollout status deployment/web             -n platform --timeout=180s
+	kubectl rollout status deployment/match-scheduler -n platform --timeout=180s
+	kubectl rollout status deployment/dispatcher      -n bots     --timeout=180s
 
 kind-down:
 	kind delete cluster

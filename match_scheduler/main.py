@@ -82,7 +82,17 @@ async def handle_pod_ready_message(message: Any, channel: Any) -> None:
 
 
 async def run() -> None:  # pragma: no cover
+    import uvicorn
+    from fastapi import FastAPI
+
+    from db.session import session_factory
+    from messaging.health import (
+        make_health_echo_handler,
+        make_health_router,
+        worker_echo_check,
+    )
     from messaging.log import configure_logging
+    from messaging.rpc_server import serve_rpc
 
     configure_logging()
 
@@ -90,9 +100,31 @@ async def run() -> None:  # pragma: no cover
     channel = await connection.channel()
     queue = await channel.declare_queue(POD_READY_QUEUE, durable=True)
 
-    async with queue.iterator() as it:
-        async for message in it:
-            await handle_pod_ready_message(message, channel)
+    health_rpc_queue = "health.match-scheduler"
+    echo_handler = make_health_echo_handler(
+        session_factory, channel, MATCH_ONDECK_QUEUE
+    )
+
+    health_app = FastAPI()
+    health_app.include_router(
+        make_health_router(
+            {"match_scheduler": worker_echo_check(BROKER_URL, health_rpc_queue)}
+        )
+    )
+    health_server = uvicorn.Server(
+        uvicorn.Config(health_app, host="0.0.0.0", port=8080, log_level="warning")
+    )
+
+    async def consume() -> None:
+        async with queue.iterator() as it:
+            async for message in it:
+                await handle_pod_ready_message(message, channel)
+
+    await asyncio.gather(
+        consume(),
+        serve_rpc(channel, health_rpc_queue, echo_handler),
+        health_server.serve(),
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover

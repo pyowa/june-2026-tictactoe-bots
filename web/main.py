@@ -6,15 +6,18 @@ from fastapi import Cookie, Depends, FastAPI, File, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+import db.session
 from entities.bot.repository import BotRepository
 from entities.match.repository import MatchRepository
 from entities.move.repository import MoveRepository
-from messaging.client import make_queue
+from messaging.client import BROKER_URL, make_queue
+from messaging.contracts import BUILD_POD_QUEUE
+from messaging.health import broker_check, db_check, make_health_router
 from messaging.log import configure_logging
 from messaging.queue import Queue
 from web.dependencies import get_bots, get_matches, get_moves, get_queue
 from web.submit import handle_submission
-from web.templates import not_found, templates
+from web.templates import not_found, read_template_sample, templates
 from web.utils import group_matches_by_version
 
 
@@ -38,14 +41,31 @@ app.mount(
     StaticFiles(directory=Path(__file__).parent / "static"),
     name="static",
 )
+app.include_router(
+    make_health_router(
+        {
+            "db": db_check(db.session.session_factory),
+            "broker": broker_check(BROKER_URL, BUILD_POD_QUEUE),
+        }
+    )
+)
 
 
 @app.get("/", response_class=HTMLResponse)
-async def index(
-    request: Request, bots: BotRepository = Depends(get_bots)
-) -> HTMLResponse:
-    rows = await bots.list_for_homepage()
-    return templates.TemplateResponse(request, "index.html", {"bots": rows})
+async def home(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "home.html",
+        {
+            "bot_template": read_template_sample("template_bot.py"),
+            "test_template": read_template_sample("test_template_bot.py"),
+        },
+    )
+
+
+@app.get("/submit", response_class=HTMLResponse)
+async def submit_form(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(request, "submit.html", {})
 
 
 @app.post("/submit", response_class=HTMLResponse)

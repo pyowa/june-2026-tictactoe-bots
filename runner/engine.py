@@ -18,6 +18,7 @@ class MatchOutcome(str, enum.Enum):
     O_FORFEIT = "o_forfeit"
     CAT = "cat"
 
+
 EMPTY_BOARD: Board = [[".", ".", "."], [".", ".", "."], [".", ".", "."]]
 
 WINNING_LINES: list[list[tuple[int, int]]] = [

@@ -84,6 +84,8 @@ COPY match_scheduler/ ./match_scheduler/
 COPY messaging/ ./messaging/
 COPY db/ ./db/
 COPY entities/ ./entities/
+COPY runner/__init__.py ./runner/__init__.py
+COPY runner/engine.py ./runner/engine.py
 CMD ["python", "-m", "match_scheduler.main"]
 
 # ---------------------------------------------------------------------------

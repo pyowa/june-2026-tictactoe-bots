@@ -16,9 +16,9 @@ from web.runtimes import DEFAULT_RUNTIME_KEY, RUNTIMES
 
 # Derived from RUNTIMES so the two stay in sync automatically.
 SUPPORTED_PYTHON_VERSIONS: tuple[str, ...] = tuple(
-    key[len("python-"):] for key in RUNTIMES if key.startswith("python-")
+    key[len("python-") :] for key in RUNTIMES if key.startswith("python-")
 )
-DEFAULT_PYTHON_VERSION: str = DEFAULT_RUNTIME_KEY[len("python-"):]
+DEFAULT_PYTHON_VERSION: str = DEFAULT_RUNTIME_KEY[len("python-") :]
 
 
 def extract_bot_name(source: str) -> str | None:
@@ -41,7 +41,7 @@ def extract_bot_name(source: str) -> str | None:
     for line in docstring.splitlines():
         stripped = line.strip()
         if stripped.lower().startswith("name:"):
-            name = stripped[len("name:"):].strip()
+            name = stripped[len("name:") :].strip()
             return name if name else None
 
     return None
@@ -76,9 +76,9 @@ def extract_runtime_key(source: str) -> str | None:
     for line in docstring.splitlines():
         stripped = line.strip()
         if stripped.lower().startswith("language:"):
-            language_key = stripped[len("language:"):].strip()
+            language_key = stripped[len("language:") :].strip()
         elif stripped.lower().startswith("python:"):
-            python_ver = stripped[len("python:"):].strip()
+            python_ver = stripped[len("python:") :].strip()
 
     if language_key is not None:
         return language_key if language_key in RUNTIMES else None
@@ -96,7 +96,7 @@ def extract_python_version(source: str) -> str | None:
     key = extract_runtime_key(source)
     if key is None:
         return None
-    return key[len("python-"):] if key.startswith("python-") else None
+    return key[len("python-") :] if key.startswith("python-") else None
 
 
 def versioned_name(base_name: str, version: int) -> str:
@@ -148,4 +148,4 @@ def group_matches_by_version(
 
 def _python_version_from_runtime_key(key: str) -> str:
     """'python-3.13' → '3.13'. Non-Python runtimes return the full key."""
-    return key[len("python-"):] if key.startswith("python-") else key
+    return key[len("python-") :] if key.startswith("python-") else key

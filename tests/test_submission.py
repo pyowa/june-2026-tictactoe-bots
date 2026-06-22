@@ -90,7 +90,7 @@ def test_resubmit_multiple_times_increments_version(client):
 def test_versioned_bots_all_appear_in_listing(client):
     upload(client, "MyBot")
     upload(client, "MyBot")
-    resp = client.get("/")
+    resp = client.get("/leaderboard")
     assert "MyBot" in resp.text
     assert "MyBotV2" in resp.text
 
@@ -428,7 +428,7 @@ def test_invalid_python_version_error_message_exact(client) -> None:
     source = b'"""\nname: MyBot\npython: 3.9\n"""\nimport sys\n'
     resp = client.post("/submit", files={"file": ("bot.py", source, "text/plain")})
     text = html.unescape(resp.text)
-    assert "banner-error\">Invalid runtime in docstring." in text
+    assert 'banner-error">Invalid runtime in docstring.' in text
     assert "'language: python-3.13' or 'python: 3.13'" in text
 
 
@@ -452,19 +452,6 @@ def test_upload_logs_exact_bot_id_and_python_version(client, mock_queue) -> None
 # ---------------------------------------------------------------------------
 # Success response — listing and name are forwarded to the template
 # ---------------------------------------------------------------------------
-
-
-def test_success_response_renders_previously_submitted_bots(client) -> None:
-    """The success page must include bots already in the DB, proving
-    list_for_homepage() was called and passed as the 'bots' context key."""
-    upload(client, "Alpha")
-    resp = upload(client, "Beta")
-    assert resp.status_code == 200
-    text = html.unescape(resp.text)
-    assert "'Beta' submitted successfully!" in text
-    # Alpha must appear in the listing — proves bots.list_for_homepage()
-    # was fetched and forwarded (not replaced with None).
-    assert "Alpha" in text
 
 
 # ---------------------------------------------------------------------------
@@ -719,5 +706,3 @@ async def test_upload_build_pod_message_has_correct_bot_id(
             )
         ).one()
     assert mock_queue.build_pod_messages[0].bot_id == row[0]
-
-

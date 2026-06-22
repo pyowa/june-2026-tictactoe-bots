@@ -180,9 +180,7 @@ async def test_draw_does_not_count_as_loss(
     assert rows["DrawNoLossFoe"].losses == 0
 
 
-async def test_losses_counts_forfeit_loss(
-    engine: AsyncEngine, _bound_db: None
-) -> None:
+async def test_losses_counts_forfeit_loss(engine: AsyncEngine, _bound_db: None) -> None:
     hero = await db_insert_bot(engine, "ForfeitLoser")
     foe = await db_insert_bot(engine, "ForfeitWinner")
 
@@ -236,9 +234,7 @@ async def test_lifetime_losses_rolls_up_across_versions(
     engine: AsyncEngine, _bound_db: None
 ) -> None:
     v1 = await db_insert_bot(engine, "LoseFam", versioned_name="LoseFam", version=1)
-    v2 = await db_insert_bot(
-        engine, "LoseFam", versioned_name="LoseFamV2", version=2
-    )
+    v2 = await db_insert_bot(engine, "LoseFam", versioned_name="LoseFamV2", version=2)
     foe = await db_insert_bot(engine, "LoseFamFoe")
 
     await db_insert_match(engine, v1, foe, foe, "o_wins")
@@ -252,12 +248,8 @@ async def test_lifetime_losses_rolls_up_across_versions(
 async def test_lifetime_losses_excludes_intra_family(
     engine: AsyncEngine, _bound_db: None
 ) -> None:
-    v1 = await db_insert_bot(
-        engine, "SelfLose", versioned_name="SelfLose", version=1
-    )
-    v2 = await db_insert_bot(
-        engine, "SelfLose", versioned_name="SelfLoseV2", version=2
-    )
+    v1 = await db_insert_bot(engine, "SelfLose", versioned_name="SelfLose", version=1)
+    v2 = await db_insert_bot(engine, "SelfLose", versioned_name="SelfLoseV2", version=2)
 
     await db_insert_match(engine, v1, v2, v2, "o_wins")
 
@@ -269,12 +261,8 @@ async def test_lifetime_losses_excludes_intra_family(
 async def test_lifetime_losses_counts_x_side_and_o_side(
     engine: AsyncEngine, _bound_db: None
 ) -> None:
-    v1 = await db_insert_bot(
-        engine, "SideLose", versioned_name="SideLose", version=1
-    )
-    v2 = await db_insert_bot(
-        engine, "SideLose", versioned_name="SideLoseV2", version=2
-    )
+    v1 = await db_insert_bot(engine, "SideLose", versioned_name="SideLose", version=1)
+    v2 = await db_insert_bot(engine, "SideLose", versioned_name="SideLoseV2", version=2)
     foe = await db_insert_bot(engine, "SideLoseFoe")
 
     await db_insert_match(engine, v1, foe, foe, "o_wins")
@@ -313,12 +301,8 @@ async def test_lifetime_losses_winner_not_in_family_join(
 async def test_leaderboard_tie_broken_by_submitted_at(
     engine: AsyncEngine, _bound_db: None
 ) -> None:
-    early = await db_insert_bot(
-        engine, "Early", submitted_at="2026-01-01T00:00:00"
-    )
-    late = await db_insert_bot(
-        engine, "Late", submitted_at="2026-06-01T00:00:00"
-    )
+    early = await db_insert_bot(engine, "Early", submitted_at="2026-01-01T00:00:00")
+    late = await db_insert_bot(engine, "Late", submitted_at="2026-06-01T00:00:00")
     foe = await db_insert_bot(engine, "Fodder", submitted_at="2026-01-01T00:00:00")
 
     await db_insert_match(engine, early, foe, early, "x_wins")

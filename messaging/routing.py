@@ -8,7 +8,7 @@ def pick_runtime_key(a: str, b: str) -> str:
     def python_tuple(key: str) -> tuple[int, ...]:
         if key.startswith("python-"):
             try:
-                return tuple(int(x) for x in key[len("python-"):].split("."))
+                return tuple(int(x) for x in key[len("python-") :].split("."))
             except ValueError:
                 return ()
         return ()

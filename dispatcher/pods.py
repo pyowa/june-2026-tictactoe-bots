@@ -29,7 +29,6 @@ def pod_name(bot_id: int) -> str:
     return f"bot-{bot_id}"
 
 
-
 def build_bot_pod_manifest(
     pod_name: str,
     image: str,
@@ -105,7 +104,6 @@ def _check_pod_phase(pod: Any, pod_name: str) -> bool:
     return bool(
         phase == "Running" and container_statuses and container_statuses[0].ready
     )
-
 
 
 def wait_for_pod_ready(

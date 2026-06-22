@@ -271,9 +271,7 @@ async def test_rabbitmq_queue_publishes_build_pod_message_as_json() -> None:
     queue._channel = channel
     queue._connection = MagicMock(is_closed=False)
 
-    await queue.enqueue_build_pod(
-        BuildPodMessage(bot_id=42, runtime_key="python-3.13")
-    )
+    await queue.enqueue_build_pod(BuildPodMessage(bot_id=42, runtime_key="python-3.13"))
 
     channel.default_exchange.publish.assert_awaited_once()
     args = channel.default_exchange.publish.call_args

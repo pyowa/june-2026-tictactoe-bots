@@ -233,14 +233,6 @@ class BotRepository:
         result = await self._session.scalars(select(Bot))
         return list(result.all())
 
-    async def list_for_homepage(self) -> list[Row[Any]]:
-        result = await self._session.execute(
-            select(Bot.versioned_name, Bot.submitted_at).order_by(
-                Bot.submitted_at.desc()
-            )
-        )
-        return list(result.all())
-
     async def owner_token(self, base_name: str) -> str | None:
         result = await self._session.execute(
             select(Bot.owner_token).where(Bot.base_name == base_name).limit(1)
@@ -281,9 +273,7 @@ class BotRepository:
         return bot
 
     async def ready_bots(self) -> list[Bot]:
-        result = await self._session.scalars(
-            select(Bot).where(Bot.pod_ready.is_(True))
-        )
+        result = await self._session.scalars(select(Bot).where(Bot.pod_ready.is_(True)))
         return list(result.all())
 
     async def set_pod_ready(self, bot_id: int, pod_name: str) -> None:

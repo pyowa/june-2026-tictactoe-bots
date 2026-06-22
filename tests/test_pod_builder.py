@@ -93,6 +93,7 @@ async def test_handle_build_pod_message_happy_path_updates_db() -> None:
         patch("dispatcher.pod_builder.wait_for_http_ready"),
         patch("asyncio.get_running_loop") as mock_loop,
     ):
+
         async def fake_run_in_executor(executor, fn, *args):
             fn()
 
@@ -260,6 +261,7 @@ async def test_handle_build_pod_message_publishes_to_correct_queue() -> None:
         patch("dispatcher.pod_builder.wait_for_http_ready"),
         patch("asyncio.get_running_loop") as mock_loop,
     ):
+
         async def fake_run_in_executor(executor, fn, *args):
             fn()
 

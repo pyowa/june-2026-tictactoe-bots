@@ -101,6 +101,30 @@ main {
 .banner-error   { background: #ffb3b3; color: var(--ink); }
 .banner-success { background: var(--main-light-blue); color: var(--ink); }
 
+.tabs {
+    display: flex;
+    gap: 0.25rem;
+    margin: 1rem 0 0;
+    border-bottom: var(--border);
+}
+.tabs button {
+    background: transparent;
+    border: var(--border);
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+    padding: 0.4rem 0.9rem;
+    font: inherit;
+    cursor: pointer;
+    color: var(--ink);
+    margin-bottom: -1px;
+}
+.tabs button.active {
+    background: var(--main-light-blue);
+    font-weight: 500;
+}
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
 p { line-height: 1.55; margin-bottom: 0.75rem; }
 .muted { color: #555; }
 

@@ -31,6 +31,16 @@ spec:
                   key: DATABASE_URL
             - name: POD_TIMEOUT
               value: "60"
+          ports:
+            - containerPort: 8080
+              name: health
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 20
           resources:
             limits:
               cpu: "500m"

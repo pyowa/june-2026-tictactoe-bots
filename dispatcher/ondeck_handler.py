@@ -23,9 +23,7 @@ RABBITMQ_URL = os.environ.get(
 _log = structlog.get_logger()
 
 
-async def _fetch_match_bots(
-    bot_x_id: int, bot_o_id: int
-) -> tuple[Any, Any] | None:
+async def _fetch_match_bots(bot_x_id: int, bot_o_id: int) -> tuple[Any, Any] | None:
     """Fetch both bots; validate they exist and have pods. Returns None on failure."""
     async with get_session() as session:
         bots = BotRepository(session)
@@ -35,9 +33,7 @@ async def _fetch_match_bots(
     bot_o = bot_map.get(bot_o_id)
 
     if bot_x is None or bot_o is None:
-        _log.error(
-            "ondeck_handler_bot_not_found", bot_x_id=bot_x_id, bot_o_id=bot_o_id
-        )
+        _log.error("ondeck_handler_bot_not_found", bot_x_id=bot_x_id, bot_o_id=bot_o_id)
         return None
 
     if bot_x.pod_name is None or bot_o.pod_name is None:
@@ -94,7 +90,10 @@ async def run() -> None:  # pragma: no cover
     import aio_pika
     from kubernetes import client, config
 
+    from db.session import session_factory
+    from messaging.health import make_health_echo_handler
     from messaging.log import configure_logging
+    from messaging.rpc_server import serve_rpc
 
     configure_logging()
     try:
@@ -108,9 +107,19 @@ async def run() -> None:  # pragma: no cover
     channel = await connection.channel()
     queue = await channel.declare_queue(MATCH_ONDECK_QUEUE, durable=True)
 
-    async with queue.iterator() as it:
-        async for message in it:
-            await handle_match_ondeck(message, channel, core_v1)
+    echo_handler = make_health_echo_handler(
+        session_factory, channel, MATCH_ONDECK_QUEUE
+    )
+
+    async def consume() -> None:
+        async with queue.iterator() as it:
+            async for message in it:
+                await handle_match_ondeck(message, channel, core_v1)
+
+    await asyncio.gather(
+        consume(),
+        serve_rpc(channel, "health.dispatcher.ondeck-handler", echo_handler),
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover

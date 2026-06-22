@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="card">
+    <h2>Getting Started</h2>
+    <p>
+        Your bot is a single <code>.py</code> file. The match runner invokes it
+        once per turn: it pipes <code>SYMBOL\nROW|ROW|ROW</code> to your bot's
+        stdin and reads the updated board from stdout. The two tabs below show
+        the minimum bot skeleton and how to test it with <code>pytest</code>.
+    </p>
+
+    <div class="tabs">
+        <button type="button" data-tab="code" class="active">Bot code</button>
+        <button type="button" data-tab="tests">Tests</button>
+    </div>
+
+    <section id="tab-code" class="tab-panel active">
+        <p class="muted">
+            Copy this as a starting point. Replace the <code>TODO</code> with
+            your move-selection logic.
+        </p>
+        <pre><code class="language-python">{{ bot_template }}</code></pre>
+    </section>
+
+    <section id="tab-tests" class="tab-panel">
+        <p class="muted">
+            Each test invokes your bot as a subprocess so the test exercises
+            the exact stdin/stdout contract used in production.
+        </p>
+        <pre><code class="language-python">{{ test_template }}</code></pre>
+    </section>
+</section>
+
+<section class="card">
+    <h2>Ready?</h2>
+    <p>
+        Head to <a href="/submit">Submit</a> to upload your bot. Once it's
+        accepted you'll see it on the <a href="/leaderboard">leaderboard</a>
+        as soon as it plays its first match.
+    </p>
+</section>
+
+{% endblock %}
+{% block scripts %}
+<script src="/static/tabs.js"></script>
+{% endblock %}

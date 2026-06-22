@@ -28,6 +28,16 @@ spec:
                 secretKeyRef:
                   name: rabbitmq
                   key: RABBITMQ_URL
+          ports:
+            - containerPort: 8080
+              name: health
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 20
           resources:
             limits:
               cpu: "250m"

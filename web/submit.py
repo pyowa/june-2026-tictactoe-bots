@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse
 from entities.bot.repository import BotRepository
 from messaging.contracts import BuildPodMessage
 from messaging.queue import Queue
-from web.templates import render_index_response, templates
+from web.templates import render_submit_response
 from web.utils import (
     _python_version_from_runtime_key,
     encode_cookie,
@@ -104,15 +104,12 @@ def _success_response(
     request: Request,
     name: str,
     owner: _OwnerContext,
-    bots: list,
 ) -> HTMLResponse:
-    """Render the index page with a success banner and (re)set the ownership
+    """Render the submit page with a success banner and (re)set the ownership
     cookie so future submissions of the same base name are recognized."""
     owner.owned[owner.bot_name] = owner.owner_token
-    response = templates.TemplateResponse(
-        request,
-        "index.html",  # pragma: no mutate -- macOS FS masks case
-        {"bots": bots, "success": f"'{name}' submitted successfully!"},
+    response = render_submit_response(
+        request, success=f"'{name}' submitted successfully!"
     )
     response.set_cookie(
         key="ttt_owned_bots",
@@ -138,11 +135,11 @@ async def handle_submission(
 
     bot_name = extract_bot_name(source)
     if err := _validate_bot_name(bot_name):
-        return render_index_response(request, error=err)
+        return render_submit_response(request, error=err)
 
     runtime_key = extract_runtime_key(source)
     if err := _validate_runtime_key(runtime_key):
-        return render_index_response(request, error=err)
+        return render_submit_response(request, error=err)
 
     assert bot_name is not None  # narrowed above
     assert runtime_key is not None  # narrowed above
@@ -151,7 +148,7 @@ async def handle_submission(
     owned = parse_cookie(owned_bots_cookie)
     owner_token, err = await _resolve_owner_token(bots, bot_name, owned)
     if err:
-        return render_index_response(request, error=err)
+        return render_submit_response(request, error=err)
 
     assert owner_token is not None  # narrowed above
 
@@ -168,11 +165,9 @@ async def handle_submission(
         python_version=python_version,
         runtime_key=runtime_key,
     )
-    listing = await bots.list_for_homepage()
 
     return _success_response(
         request,
         name,
         _OwnerContext(owned=owned, owner_token=owner_token, bot_name=bot_name),
-        listing,
     )
