@@ -133,9 +133,15 @@ class _RecordingQueue:
 
     def __init__(self) -> None:
         self.build_pod_messages: list[BuildPodMessage] = []
+        self.events: list[tuple[str, dict[str, Any]]] = []
 
     async def enqueue_build_pod(self, msg: BuildPodMessage) -> None:
         self.build_pod_messages.append(msg)
+
+    async def publish_event(
+        self, event_type: str, details: dict[str, Any] | None = None
+    ) -> None:
+        self.events.append((event_type, details or {}))
 
 
 @pytest.fixture()

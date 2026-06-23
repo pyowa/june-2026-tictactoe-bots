@@ -126,6 +126,68 @@ async def test_handle_match_ondeck_happy_path_match_result_passed_to_record(
 
 
 # ---------------------------------------------------------------------------
+# Dashboard event publishing — match.finished hits the events fanout
+# ---------------------------------------------------------------------------
+
+
+@patch("asyncio.get_running_loop")
+@patch("dispatcher.ondeck_handler.run_match_from_pods")
+@patch("dispatcher.ondeck_handler.MatchRepository")
+@patch("dispatcher.ondeck_handler.BotRepository")
+@patch("dispatcher.ondeck_handler.get_session")
+async def test_handle_match_ondeck_publishes_match_finished_event(
+    mock_get_session: MagicMock,
+    mock_bot_repo_cls: MagicMock,
+    mock_match_repo_cls: MagicMock,
+    mock_run_match: MagicMock,
+    mock_loop: MagicMock,
+) -> None:
+    """Happy path publishes `match.finished` to the `ttt.events` fanout
+    exchange after recording. The dashboard WebSocket forwards this to
+    connected dashboards so the battle-end sound plays."""
+    import json as _json
+
+    bot_x = _make_bot_mock(5, pod_name="pod-bot-5")
+    bot_o = _make_bot_mock(6, pod_name="pod-bot-6")
+    msg_body = MatchOndeck(bot_x_id=5, bot_o_id=6, correlation_id="cid-event")
+    message = _make_message(msg_body.model_dump_json().encode())
+
+    fake_exchange = MagicMock()
+    fake_exchange.publish = AsyncMock()
+    channel = MagicMock()
+    channel.declare_exchange = AsyncMock(return_value=fake_exchange)
+    core_v1 = MagicMock()
+
+    bot_repo_instance = MagicMock()
+    bot_repo_instance.by_ids = AsyncMock(return_value={5: bot_x, 6: bot_o})
+    mock_bot_repo_cls.return_value = bot_repo_instance
+
+    match_repo_instance = MagicMock()
+    match_repo_instance.record = AsyncMock()
+    mock_match_repo_cls.return_value = match_repo_instance
+
+    fake_result = MatchResult(MatchOutcome.X_WINS, [])
+    mock_run_match.return_value = fake_result
+
+    mock_get_session.side_effect = [_make_session_ctx(), _make_session_ctx()]
+
+    async def fake_run_in_executor(executor, fn, *args):
+        return fn()
+
+    mock_loop.return_value.run_in_executor = fake_run_in_executor
+    await handle_match_ondeck(message, channel, core_v1)
+
+    channel.declare_exchange.assert_awaited_once()
+    fake_exchange.publish.assert_awaited_once()
+    await_args = fake_exchange.publish.await_args
+    assert await_args is not None
+    published_msg = await_args[0][0]
+    body = _json.loads(published_msg.body.decode())
+    assert body["type"] == "match.finished"
+    assert body["details"]["result"] == MatchOutcome.X_WINS.value
+
+
+# ---------------------------------------------------------------------------
 # Invalid JSON body — ack silently
 # ---------------------------------------------------------------------------
 

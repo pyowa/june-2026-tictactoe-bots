@@ -358,6 +358,7 @@ async def test_ensure_connected_opens_connection_when_none() -> None:
 
     mock_channel = MagicMock()
     mock_channel.declare_queue = AsyncMock()
+    mock_channel.declare_exchange = AsyncMock()
     mock_connection = MagicMock(is_closed=False)
     mock_connection.channel = AsyncMock(return_value=mock_channel)
 
@@ -411,3 +412,57 @@ async def test_rabbitmq_queue_close_skips_when_no_connection() -> None:
 
     queue = RabbitMQQueue("amqp://test")
     await queue.close()  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# publish_event — RabbitMQQueue fans dashboard events out to the events
+# exchange so the WebSocket endpoint can forward them to dashboards.
+# ---------------------------------------------------------------------------
+
+
+async def test_publish_event_sends_json_to_events_exchange() -> None:
+    """`publish_event` serializes the event to JSON and publishes on the
+    fanout exchange (routing_key empty for fanout semantics)."""
+    import json as _json
+
+    from messaging.rabbitmq import RabbitMQQueue
+
+    mock_exchange = MagicMock()
+    mock_exchange.publish = AsyncMock()
+    queue = RabbitMQQueue("amqp://test")
+    queue._connection = MagicMock(is_closed=False)
+    queue._events_exchange = mock_exchange
+    queue._channel = MagicMock()
+
+    await queue.publish_event("bot.uploaded", {"versioned_name": "AlphaV3"})
+
+    mock_exchange.publish.assert_awaited_once()
+    await_args = mock_exchange.publish.await_args
+    assert await_args is not None
+    (message,), kwargs = await_args
+    body = _json.loads(message.body.decode())
+    assert body == {"type": "bot.uploaded", "details": {"versioned_name": "AlphaV3"}}
+    assert kwargs["routing_key"] == ""
+
+
+async def test_publish_event_default_details_is_empty_dict() -> None:
+    """When called with no details, the published body uses an empty dict
+    (never `None`, which would round-trip through json poorly)."""
+    import json as _json
+
+    from messaging.rabbitmq import RabbitMQQueue
+
+    mock_exchange = MagicMock()
+    mock_exchange.publish = AsyncMock()
+    queue = RabbitMQQueue("amqp://test")
+    queue._connection = MagicMock(is_closed=False)
+    queue._events_exchange = mock_exchange
+    queue._channel = MagicMock()
+
+    await queue.publish_event("match.finished")
+
+    await_args = mock_exchange.publish.await_args
+    assert await_args is not None
+    (message,), _ = await_args
+    body = _json.loads(message.body.decode())
+    assert body == {"type": "match.finished", "details": {}}

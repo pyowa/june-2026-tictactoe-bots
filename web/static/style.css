@@ -225,6 +225,33 @@ button:hover { background: var(--main-yellow); }
     color: var(--ink);
 }
 
+.audio-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.88);
+    color: var(--paper);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 1000;
+    text-align: center;
+    padding: 2rem;
+}
+.audio-overlay[hidden] { display: none; }
+.audio-overlay-text {
+    font-family: "Francois One", sans-serif;
+    font-size: clamp(2rem, 6vw, 4rem);
+    margin: 0;
+    color: var(--paper);
+}
+.audio-overlay-hint {
+    font-size: 1.2rem;
+    margin: 1rem 0 0;
+    opacity: 0.7;
+    color: var(--paper);
+}
+
 table {
     width: 100%;
     border-collapse: collapse;

@@ -4,6 +4,13 @@
 
 {% block content %}
 
+<div id="audio-overlay" class="audio-overlay" hidden>
+    <div>
+        <p class="audio-overlay-text">Click to enable sound</p>
+        <p class="audio-overlay-hint">Tap anywhere</p>
+    </div>
+</div>
+
 <section class="dashboard-banner">
     {% if host_ip %}
     <p class="dashboard-url">http://{{ host_ip }}:8000</p>
@@ -53,4 +60,5 @@
 
 {% block scripts %}
 <script src="/static/live-poll.js" data-target="live-region" data-interval="2000"></script>
+<script type="module" src="/static/dashboard.mjs"></script>
 {% endblock %}

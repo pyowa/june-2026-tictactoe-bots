@@ -14,7 +14,7 @@ from fastapi import Request, UploadFile
 from fastapi.responses import HTMLResponse
 
 from entities.bot.repository import BotRepository
-from messaging.contracts import BuildPodMessage
+from messaging.contracts import EVENT_BOT_UPLOADED, BuildPodMessage
 from messaging.queue import Queue
 from web.templates import render_submit_response
 from web.utils import (
@@ -158,6 +158,7 @@ async def handle_submission(
     await queue.enqueue_build_pod(
         BuildPodMessage(bot_id=new_bot_id, runtime_key=runtime_key)
     )
+    await queue.publish_event(EVENT_BOT_UPLOADED, {"versioned_name": name})
     _log.info(
         "bot_uploaded",
         bot_name=bot_name,

@@ -683,6 +683,29 @@ def test_upload_publishes_one_build_pod_message(client, mock_queue) -> None:
     assert len(mock_queue.build_pod_messages) == 1
 
 
+def test_upload_publishes_bot_uploaded_event(client, mock_queue) -> None:
+    """Uploading a bot fires a `bot.uploaded` dashboard event with the
+    versioned name in details so the dashboard's airhorn knows what to say."""
+    upload(client, "Cheerleader")
+    assert ("bot.uploaded", {"versioned_name": "Cheerleader"}) in mock_queue.events
+
+
+def test_upload_event_uses_versioned_name_for_resubmission(client, mock_queue) -> None:
+    """A second upload of the same base name gets a versioned name (V2);
+    the dashboard event should reflect that to give viewers context."""
+    upload(client, "Returner")
+    upload(client, "Returner")
+    event_types = [e[0] for e in mock_queue.events]
+    assert event_types.count("bot.uploaded") == 2
+    versioned_names = [
+        details["versioned_name"]
+        for kind, details in mock_queue.events
+        if kind == "bot.uploaded"
+    ]
+    assert "Returner" in versioned_names
+    assert "ReturnerV2" in versioned_names
+
+
 def test_upload_build_pod_message_has_correct_runtime_key(client, mock_queue) -> None:
     """The BuildPodMessage runtime_key matches the bot's declared runtime."""
     from web.runtimes import DEFAULT_RUNTIME_KEY

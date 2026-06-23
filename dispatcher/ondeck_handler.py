@@ -14,7 +14,12 @@ from db.session import get_session
 from dispatcher.match_runner import run_match_from_pods
 from entities.bot.repository import BotRepository
 from entities.match.repository import MatchRepository
-from messaging.contracts import MATCH_ONDECK_QUEUE, MatchOndeck
+from messaging.contracts import (
+    EVENT_MATCH_FINISHED,
+    EVENTS_EXCHANGE,
+    MATCH_ONDECK_QUEUE,
+    MatchOndeck,
+)
 
 RABBITMQ_URL = os.environ.get(
     "RABBITMQ_URL", "amqp://guest:guest@host.docker.internal:5672/"
@@ -79,11 +84,34 @@ async def handle_match_ondeck(
             matches = MatchRepository(session)
             await matches.record(msg.bot_x_id, msg.bot_o_id, result, msg.correlation_id)
 
+        # Publish to the events fanout so the dashboard WebSocket plays a
+        # sound. Best-effort: if the broker is unhappy we log + swallow so
+        # the consumer ack isn't blocked.
+        try:
+            await _publish_match_finished(channel, result.result)
+        except Exception as exc:  # pragma: no cover -- broker outage path
+            _log.warning("event_publish_failed", error=repr(exc))
+
         _log.info(
             "match_complete",
             correlation_id=msg.correlation_id,
             result=result.result,
         )
+
+
+async def _publish_match_finished(channel: Any, result: str) -> None:
+    """Publish a match.finished event to the dashboard fanout exchange."""
+    import json
+
+    import aio_pika
+
+    exchange = await channel.declare_exchange(
+        EVENTS_EXCHANGE, aio_pika.ExchangeType.FANOUT, durable=False
+    )
+    body = json.dumps(
+        {"type": EVENT_MATCH_FINISHED, "details": {"result": result}}
+    ).encode()
+    await exchange.publish(aio_pika.Message(body=body), routing_key="")
 
 
 async def run() -> None:  # pragma: no cover

@@ -161,6 +161,21 @@ The human-vs-bot play feature (`web/play.py`, `web/bot_client.py`, `web/static/p
 - [ ] **Symbol-randomness test is mock-only.** `test_play_vs_human_symbol_x_is_reachable` / `_o_is_reachable` both `monkeypatch.setattr(secrets, "choice", ...)`. If someone hardcoded `human_symbol = "X"` and removed the `secrets.choice(...)` call entirely, the mocks would just sit unused and both tests would pass. Fix: at least one test that doesn't mock and instead asserts over many requests that *both* symbols appear (statistical, but covers the regression).
 - [ ] **Browser tests use a stub bot client.** `tests/browser/test_play.py::stub_bot_client` monkeypatches `web.bot_client.get_core_v1` and `web.bot_client.urlopen`. Any silent break inside `request_bot_turn` that escapes the unit tests would also escape the browser layer. Fix: not really fixable without standing up real bot pods in CI — accept as a known integration gap, but flag if/when adding live-cluster acceptance tests.
 
+### Swap live-poll for WebSocket-driven updates
+
+Today three pages auto-refresh via `web/static/live-poll.js`, which re-fetches the full page every ~2s and swaps a `#live-region` element's `innerHTML`:
+
+- `/leaderboard` — `data-target="live-region" data-interval="2000"`
+- `/matches` — same pattern
+- `/dashboard` — same pattern (plus sound effects via the new `ttt.events` fanout)
+
+Now that `/dashboard/ws` exists, we have a real-time push channel from the cluster. Once the sound-effects feature is verified working, the same WebSocket can carry richer events that drive partial updates without re-fetching the page:
+
+- `leaderboard.changed` — emitted after a match is recorded
+- `matches.changed` — same source
+
+Each page would open `/dashboard/ws` (or a more focused topic, e.g. `/events/leaderboard`), and on receipt of the corresponding event re-fetch only the table fragment or apply a diff. Deletes `live-poll.js`. Cuts steady-state bandwidth by an order of magnitude. Adds a new pattern (server-pushed re-fetch triggers) the project doesn't yet use, so worth a separate session to design carefully.
+
 ### Deliberately unkillable (defensive code, not bugs)
 
 These three mutations survive because the protected code is either logically dead or explicitly excluded from coverage; flagging them so a future audit doesn't waste time re-investigating.

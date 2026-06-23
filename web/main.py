@@ -4,7 +4,19 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Cookie, Depends, FastAPI, File, Form, Request, Response, UploadFile
+import aio_pika
+from fastapi import (
+    Cookie,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    Request,
+    Response,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -13,7 +25,7 @@ from entities.bot.repository import BotRepository
 from entities.match.repository import MatchRepository
 from entities.move.repository import MoveRepository
 from messaging.client import BROKER_URL, make_queue
-from messaging.contracts import BUILD_POD_QUEUE
+from messaging.contracts import BUILD_POD_QUEUE, EVENTS_EXCHANGE
 from messaging.health import broker_check, db_check, make_health_router
 from messaging.log import configure_logging
 from messaging.queue import Queue
@@ -146,6 +158,39 @@ async def dashboard(
     return templates.TemplateResponse(
         request, "dashboard.html", {"rows": rows, "host_ip": host_ip}
     )
+
+
+@app.websocket("/dashboard/ws")
+async def dashboard_ws(websocket: WebSocket) -> None:
+    """Stream `ttt.events` fanout messages to a dashboard tab. Each tab gets
+    its own exclusive auto-delete queue bound to the events exchange so all
+    open dashboards receive every event."""
+    await websocket.accept()
+    connection = None
+    try:
+        connection = await aio_pika.connect_robust(BROKER_URL)
+        channel = await connection.channel()
+        exchange = await channel.declare_exchange(
+            EVENTS_EXCHANGE, aio_pika.ExchangeType.FANOUT, durable=False
+        )
+        queue = await channel.declare_queue(exclusive=True, auto_delete=True)
+        await queue.bind(exchange)
+        async with queue.iterator() as it:
+            async for message in it:
+                async with message.process():
+                    try:
+                        await websocket.send_text(message.body.decode())
+                    except WebSocketDisconnect:
+                        return
+                    except RuntimeError:
+                        # Starlette raises RuntimeError if we try to send on a
+                        # closed websocket. Treat the same as disconnect.
+                        return
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if connection is not None and not connection.is_closed:
+            await connection.close()
 
 
 @app.get("/matches", response_class=HTMLResponse)

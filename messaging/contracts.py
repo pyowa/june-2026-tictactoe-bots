@@ -16,6 +16,14 @@ BUILD_POD_QUEUE = "matches.build"
 POD_READY_QUEUE = "matches.schedule"
 MATCH_ONDECK_QUEUE = "matches.ondeck"
 
+# Fanout exchange the dashboard subscribes to (via WebSocket) so it can play
+# a sound effect when something noteworthy happens. Publishers: web (on bot
+# upload) and dispatcher (on match completion).
+EVENTS_EXCHANGE = "ttt.events"
+
+EVENT_BOT_UPLOADED = "bot.uploaded"
+EVENT_MATCH_FINISHED = "match.finished"
+
 
 class BuildPodMessage(BaseModel):
     """Sent by web when a bot is uploaded; tells pod_builder to create a pod."""

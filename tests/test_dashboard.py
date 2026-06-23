@@ -98,6 +98,24 @@ def test_dashboard_omits_nav_links(client) -> None:
         assert f'>{label}</a>' not in resp.text, f"unexpected nav link: {label}"
 
 
+def test_dashboard_renders_audio_overlay(client) -> None:
+    """The 'Click to enable sound' overlay is rendered (initially hidden;
+    JS unhides on load). Required because browser autoplay policies block
+    the AudioContext until a user gesture."""
+    resp = client.get("/dashboard")
+    assert 'id="audio-overlay"' in resp.text
+    assert "Click to enable sound" in resp.text
+
+
+def test_dashboard_loads_dashboard_mjs_for_sound(client) -> None:
+    """The dashboard.mjs script is loaded so the WebSocket + Web Audio
+    plumbing runs."""
+    resp = client.get("/dashboard")
+    assert 'src="/static/dashboard.mjs"' in resp.text
+    # Module type required for `import`-statement support in dashboard.mjs.
+    assert 'type="module"' in resp.text
+
+
 def test_dashboard_banner_marked_for_full_width_break_out(client) -> None:
     """The banner CSS class is present and the inline-style template hasn't
     been swapped for a card-wrapped layout that would re-constrain it."""
