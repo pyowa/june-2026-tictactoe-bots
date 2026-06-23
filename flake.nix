@@ -28,6 +28,16 @@
             k9s
             kubeconform
 
+            # Node side — just the runtime for `node --test` on the
+            # match-player state machine. No npm/pnpm dependencies; tests
+            # use the built-in `node:test` module.
+            nodejs
+
+            # Playwright's Chromium build. PLAYWRIGHT_BROWSERS_PATH below
+            # points pytest-playwright at this so it doesn't try to fetch
+            # its own browsers at first-run.
+            playwright-driver.browsers-chromium
+
             # Day-to-day utilities.
             jq
             curl
@@ -39,6 +49,8 @@
           shellHook = ''
             export UV_PYTHON=${pkgs.python313}/bin/python3.13
             export UV_PYTHON_DOWNLOADS=never
+            export PLAYWRIGHT_BROWSERS_PATH=${pkgs.playwright-driver.browsers-chromium}
+            export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=true
           '';
         };
       });

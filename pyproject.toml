@@ -41,6 +41,13 @@ dev = [
     "psycopg2-binary",
     "mutmut>=3.5.0",
     "beautifulsoup4>=4.15.0",
+    # Browser-driving tests for the match-detail playback animation. The
+    # Chromium binary itself comes from the nix dev shell (see flake.nix);
+    # pytest-playwright is just the Python harness. Pin `playwright` to the
+    # exact version nix's `playwright-driver` ships so the browser revision
+    # the library expects matches the binary already on disk.
+    "playwright==1.59.0",
+    "pytest-playwright",
     # needed for dispatcher unit tests
     {include-group = "dispatcher"},
 ]
@@ -59,7 +66,7 @@ ignore = ["ANN401"]
 "web/templates/*.py" = ["ANN"]
 
 [tool.pytest.ini_options]
-addopts = "--cov=web --cov=db --cov=entities --cov=runner --cov=messaging --cov=scripts --cov-report=term-missing --ignore=tests/acceptance"
+addopts = "--cov=web --cov=db --cov=entities --cov=runner --cov=messaging --cov=scripts --cov-report=term-missing --ignore=tests/acceptance --ignore=tests/browser"
 asyncio_mode = "auto"
 testpaths = ["tests"]
 norecursedirs = ["mutants", ".claude"]

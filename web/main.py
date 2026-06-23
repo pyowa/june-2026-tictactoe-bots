@@ -1,3 +1,4 @@
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -158,12 +159,24 @@ async def _render_match(
     if match is None:
         return not_found(request)
     move_rows = await moves.for_match(match_id)
+    moves_json = json.dumps(
+        [
+            {
+                "move_number": m.move_number,
+                "bot_name": m.bot_name,
+                "board_state": m.board_state,
+                "error": m.error,
+            }
+            for m in move_rows
+        ]
+    )
     return templates.TemplateResponse(
         request,
         "match_detail.html",  # pragma: no mutate -- macOS FS masks case mutation
         {
             "match": match,
             "moves": move_rows,
+            "moves_json": moves_json,
             "back_url": back_url,
             "back_label": back_label,
         },

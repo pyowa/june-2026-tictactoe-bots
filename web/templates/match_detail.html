@@ -21,31 +21,65 @@
 </section>
 
 <section class="card">
-    <h2>Move Log</h2>
+    <h2>Playback</h2>
+
     {% if moves %}
-    <div class="move-log">
-        {% for move in moves %}
-        <div class="move">
-            <div class="move-header">
-                <span class="move-number">Move {{ move.move_number }}</span>
-                <span class="move-bot">{{ move.bot_name }}</span>
-            </div>
-            {% if move.error %}
-            <div class="banner banner-error">Error: {{ move.error }}</div>
-            {% else %}
-            <div class="board">
-                {% for row in move.board_state.split('\n') %}
-                {% for cell in row.split('|') %}
-                <div class="cell cell-{{ cell | lower | replace('.', 'empty') }}">
-                    {{ '' if cell == '.' else cell }}
-                </div>
-                {% endfor %}
-                {% endfor %}
-            </div>
-            {% endif %}
+    <div class="match-player">
+        <div id="match-player-status" class="match-player-status muted">Press play to start.</div>
+
+        <div id="match-player-board" class="board" data-x-bot="{{ match.bot_x }}" data-o-bot="{{ match.bot_o }}" data-result="{{ match.result }}">
+            {% for _ in range(9) %}
+            <div class="cell cell-empty"></div>
+            {% endfor %}
         </div>
-        {% endfor %}
+
+        <div class="match-player-controls">
+            <button type="button" data-action="jumpStart" aria-label="Jump to start">
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+            </button>
+            <button type="button" data-action="stepBack" aria-label="Step back">
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M14 7l-5 5 5 5V7z"/></svg>
+            </button>
+            <button type="button" data-action="playPause" aria-label="Play / pause" class="primary" data-state="paused">
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+            </button>
+            <button type="button" data-action="stepForward" aria-label="Step forward">
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 17l5-5-5-5v10z"/></svg>
+            </button>
+            <button type="button" data-action="jumpEnd" aria-label="Jump to end">
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 18l8.5-6L6 6zM16 6v12h2V6z"/></svg>
+            </button>
+        </div>
     </div>
+
+    <script id="moves-data" type="application/json">{{ moves_json | safe }}</script>
+    <script type="module" src="/static/match-player.mjs"></script>
+
+    <noscript>
+        <div class="move-log">
+            {% for move in moves %}
+            <div class="move">
+                <div class="move-header">
+                    <span class="move-number">Move {{ move.move_number }}</span>
+                    <span class="move-bot">{{ move.bot_name }}</span>
+                </div>
+                {% if move.error %}
+                <div class="banner banner-error">Error: {{ move.error }}</div>
+                {% else %}
+                <div class="board">
+                    {% for row in move.board_state.split('\n') %}
+                    {% for cell in row.split('|') %}
+                    <div class="cell cell-{{ cell | lower | replace('.', 'empty') }}">
+                        {{ '' if cell == '.' else cell }}
+                    </div>
+                    {% endfor %}
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </noscript>
     {% else %}
     <p class="muted">No moves recorded for this match.</p>
     {% endif %}

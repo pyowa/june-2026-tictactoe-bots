@@ -2,7 +2,7 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := check
 
-.PHONY: test lint lint-md lint-k8s format typecheck check \
+.PHONY: test js-test browser-test lint lint-md lint-k8s format typecheck check \
         seed-examples reset-db mutate acceptance \
         kind-up kind-down build-images kind-load reload-web
 
@@ -10,6 +10,12 @@ SHELL := /bin/bash
 
 test:
 	uv run pytest
+
+js-test:
+	node --test tests/js/*.test.mjs
+
+browser-test:
+	uv run pytest tests/browser/ --no-cov -o addopts=""
 
 lint:
 	uv run ruff check .
@@ -28,7 +34,7 @@ format:
 typecheck:
 	uv run ty check web/*.py db/ entities/ runner/ messaging/ scripts/ tests/
 
-check: lint lint-md lint-k8s typecheck test
+check: lint lint-md lint-k8s typecheck test js-test browser-test
 
 seed-examples:
 	uv run python -m scripts.seed_example_bots
