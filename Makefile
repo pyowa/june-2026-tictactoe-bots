@@ -134,4 +134,11 @@ reload-web:
 	set -e
 	docker build -t pyowa/web:latest --target web .
 	kind load docker-image pyowa/web:latest
+	HOST_IP=$$(ipconfig getifaddr en0 2>/dev/null || true); \
+	  if [ -n "$$HOST_IP" ]; then \
+	    echo "Setting HOST_IP=$$HOST_IP on web deployment for /dashboard banner"; \
+	    kubectl set env deployment/web -n platform HOST_IP=$$HOST_IP; \
+	  else \
+	    echo "Warning: could not detect Wi-Fi IP via en0 — /dashboard will show '(not detected)'" >&2; \
+	  fi
 	kubectl rollout restart deployment/web -n platform

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block header %}{% endblock %}
+
+{% block content %}
+
+<section class="dashboard-banner">
+    {% if host_ip %}
+    <p class="dashboard-url">http://{{ host_ip }}:8000</p>
+    {% else %}
+    <p class="dashboard-url muted">http://(not detected):8000</p>
+    <p class="dashboard-hint">Run <code>make reload-web</code> on the host to detect the Wi-Fi IP.</p>
+    {% endif %}
+</section>
+
+<section class="card">
+    <h2>Leaderboard</h2>
+    <div id="live-region">
+    {% if rows %}
+    <table>
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Bot</th>
+                <th>Clean Wins</th>
+                <th>Forfeit Wins</th>
+                <th>Draws</th>
+                <th>Losses</th>
+                <th>Lifetime</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            <tr data-bot="{{ row.versioned_name }}">
+                <td class="muted">{{ loop.index }}</td>
+                <td><a href="/bots/{{ row.base_name }}">{{ row.versioned_name }}</a></td>
+                <td class="stat-wins">{{ row.clean_wins }}</td>
+                <td class="{% if row.forfeit_wins > 0 %}stat-forfeit{% else %}muted{% endif %}">{{ row.forfeit_wins }}</td>
+                <td class="muted">{{ row.draws }}</td>
+                <td class="muted">{{ row.losses }}</td>
+                <td class="muted">{{ row.lifetime_wins }}-{{ row.lifetime_losses }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No bots submitted yet.</p>
+    {% endif %}
+    </div>
+</section>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/live-poll.js" data-target="live-region" data-interval="2000"></script>
+{% endblock %}

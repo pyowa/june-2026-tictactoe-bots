@@ -1,4 +1,5 @@
 import json
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -129,6 +130,22 @@ async def leaderboard(
 ) -> HTMLResponse:
     rows = await bots.leaderboard()
     return templates.TemplateResponse(request, "leaderboard.html", {"rows": rows})
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard(
+    request: Request, bots: BotRepository = Depends(get_bots)
+) -> HTMLResponse:
+    """Event-mode dashboard: shows the host's LAN URL in big bold font for
+    others to type/scan, with the live-polling leaderboard underneath.
+
+    `HOST_IP` is injected onto the web Deployment by `make reload-web` —
+    auto-detected from the host's Wi-Fi interface (en0)."""
+    rows = await bots.leaderboard()
+    host_ip = os.environ.get("HOST_IP", "").strip() or None
+    return templates.TemplateResponse(
+        request, "dashboard.html", {"rows": rows, "host_ip": host_ip}
+    )
 
 
 @app.get("/matches", response_class=HTMLResponse)

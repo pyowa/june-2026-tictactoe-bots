@@ -14,6 +14,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
 </head>
 <body>
+    {% block header %}
     <header>
         <img src="/static/pyowa-logo.png" alt="Pyowa" class="site-logo">
         <div class="site-title">
@@ -33,6 +34,7 @@
         <strong>Cookies are disabled.</strong> You must enable cookies to submit a bot &mdash;
         they are used to track ownership so you can update your bot during the event.
     </div>
+    {% endblock %}
 
     <main>
         {% block content %}{% endblock %}

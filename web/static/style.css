@@ -198,6 +198,33 @@ button {
 
 button:hover { background: var(--main-yellow); }
 
+.dashboard-banner {
+    background: var(--main-yellow);
+    border-top: var(--border);
+    border-bottom: var(--border);
+    padding: 2rem 1.5rem;
+    text-align: center;
+    /* Break out of <main>'s 880px max-width and 2rem auto margin so the
+       banner spans the full viewport edge-to-edge. */
+    width: 100vw;
+    margin-left: calc(50% - 50vw);
+    margin-top: -2rem;
+    margin-bottom: 1.5rem;
+}
+.dashboard-url {
+    font-family: "Francois One", sans-serif;
+    font-size: clamp(2.5rem, 7vw, 5.5rem);
+    line-height: 1.1;
+    color: var(--ink);
+    margin: 0;
+    white-space: nowrap;
+}
+.dashboard-hint {
+    margin: 0.75rem 0 0;
+    font-size: 1rem;
+    color: var(--ink);
+}
+
 table {
     width: 100%;
     border-collapse: collapse;
