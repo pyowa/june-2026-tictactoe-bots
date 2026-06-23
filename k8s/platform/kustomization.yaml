@@ -8,6 +8,9 @@ resources:
   - postgres/Service.yaml
   - rabbitmq/Deployment.yaml
   - rabbitmq/Service.yaml
+  - web/ServiceAccount.yaml
+  - web/Role.yaml
+  - web/RoleBinding.yaml
   - web/Deployment.yaml
   - web/Service.yaml
   - match-scheduler/Deployment.yaml

@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="card">
+    <h2>{{ player_name }} vs {{ bot_name }}</h2>
+    <p class="muted">You play <strong>{{ human_symbol }}</strong>; {{ bot_name }} plays <strong>{{ bot_symbol }}</strong>.</p>
+
+    <div class="match-player">
+        <div id="play-status" class="match-player-status muted">Loading...</div>
+
+        <div id="play-board" class="board play-board"
+             data-bot-id="{{ bot_id }}"
+             data-bot-name="{{ bot_name }}"
+             data-player-name="{{ player_name }}"
+             data-human-symbol="{{ human_symbol }}"
+             data-bot-symbol="{{ bot_symbol }}"
+             data-disabled="false">
+            {% for i in range(9) %}
+            <div class="cell play-cell cell-empty" data-index="{{ i }}"></div>
+            {% endfor %}
+        </div>
+
+        <p>
+            <a id="play-again-link" data-action="play-again" href="/play/vs/{{ bot_id }}" hidden>Play again</a>
+        </p>
+        <p><a href="/play">&larr; Pick a different bot</a></p>
+    </div>
+
+    <script type="module" src="/static/play.mjs"></script>
+</section>
+
+{% endblock %}

@@ -39,8 +39,11 @@ RUN uv sync --frozen --no-dev --no-install-project
 # ---------------------------------------------------------------------------
 # web: FastAPI app served by uvicorn.
 # Source is baked in for k8s; compose bind-mounts overlay it for dev --reload.
+# The `dispatcher` dep group adds the kubernetes client, which the play page
+# uses to look up bot pod IPs for human-vs-bot turns.
 # ---------------------------------------------------------------------------
 FROM base AS web
+RUN uv sync --frozen --no-dev --group dispatcher --no-install-project
 EXPOSE 8000
 # Bake in all source modules needed by web and alembic migrations.
 COPY web/ ./web/

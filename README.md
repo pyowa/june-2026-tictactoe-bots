@@ -278,7 +278,7 @@ sequenceDiagram
 
 ```text
 tic-tac-toe-event/
-├── web/                       # FastAPI app (submission UI, leaderboard, matches)
+├── web/                       # FastAPI app (submission UI, leaderboard, matches, human-vs-bot play)
 ├── runner/                    # engine.py (pure board logic)
 ├── dispatcher/                # main.py (k8s dispatcher entrypoint) · pod_builder.py (creates permanent bot pods) · ondeck_handler.py (drives match game loops) · pods.py (pod lifecycle helpers)
 ├── match_scheduler/           # main.py — compose service; consumes matches.schedule, publishes MatchOndeck per pairing to matches.ondeck

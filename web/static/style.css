@@ -168,6 +168,23 @@ input[type="file"] {
     font-family: inherit;
 }
 
+input[type="text"] {
+    display: block;
+    padding: 0.5rem 1.1rem;
+    min-width: 18rem;
+    background: var(--paper);
+    border: var(--border);
+    border-radius: 999px;
+    color: var(--ink);
+    font-family: inherit;
+    font-size: 1rem;
+    margin-bottom: 1rem;
+}
+input[type="text"]:focus {
+    outline: none;
+    background: var(--main-light-blue);
+}
+
 button {
     font-family: "Francois One", sans-serif;
     font-size: 1.1rem;
@@ -281,6 +298,44 @@ a:hover { color: var(--ink); }
     to   { transform: scale(1);   opacity: 1; }
 }
 .cell-placing { animation: cell-place 0.25s ease-out; }
+
+/* Human-vs-bot play page: dim and unclickable while waiting on the bot. */
+.play-board[data-disabled="true"] {
+    pointer-events: none;
+    opacity: 0.7;
+}
+.play-board[data-disabled="false"] .play-cell.cell-empty:hover {
+    background: var(--main-light-blue);
+    cursor: pointer;
+}
+#play-bot-table td:last-child { text-align: right; }
+.play-action {
+    display: inline-block;
+    padding: 0.3rem 0.9rem;
+    border: var(--border);
+    border-radius: 999px;
+    text-decoration: none;
+    color: var(--ink);
+    background: var(--main-blue);
+    color: var(--paper);
+    font-family: "Francois One", sans-serif;
+    font-size: 0.95rem;
+}
+.play-action:hover { background: var(--main-yellow); color: var(--ink); }
+#play-again-link {
+    padding: 0.4rem 0.9rem;
+    border: var(--border);
+    border-radius: 999px;
+    text-decoration: none;
+    color: var(--ink);
+    background: var(--main-light-blue);
+    font-family: "Francois One", sans-serif;
+}
+#play-again-link[hidden] { display: none; }
+#play-again-link:not([hidden]) { display: inline-block; }
+#play-again-link:hover {
+    background: var(--main-yellow);
+}
 
 .match-player {
     display: flex;

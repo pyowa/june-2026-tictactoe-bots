@@ -276,6 +276,25 @@ class BotRepository:
         result = await self._session.scalars(select(Bot).where(Bot.pod_ready.is_(True)))
         return list(result.all())
 
+    async def ready_bots_for_play(self) -> list[Row[Any]]:
+        """Return per-row info for every `pod_ready` bot, alphabetized.
+
+        Drives the human-vs-bot play picker: all versions of every ready bot
+        appear, sorted by versioned_name."""
+        stmt = (
+            select(
+                Bot.id.label("id"),
+                Bot.versioned_name.label("versioned_name"),
+                Bot.base_name.label("base_name"),
+                Bot.python_version.label("python_version"),
+                Bot.submitted_at.label("submitted_at"),
+            )
+            .where(Bot.pod_ready.is_(True))
+            .order_by(Bot.versioned_name.asc())
+        )
+        result = await self._session.execute(stmt)
+        return list(result.all())
+
     async def set_pod_ready(self, bot_id: int, pod_name: str) -> None:
         bot = await self._session.get(Bot, bot_id)
         if bot is not None:

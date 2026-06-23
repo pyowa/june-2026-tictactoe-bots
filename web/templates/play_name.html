@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="card">
+    <h2>Play vs a Bot</h2>
+
+    {% if error %}
+    <div class="banner banner-error">{{ error }}</div>
+    {% endif %}
+
+    <p>Pick a display name. We&rsquo;ll show it during play so you know which board mark is yours.</p>
+
+    <form method="post" action="/play/name">
+        <label for="player_name">Your name</label>
+        <input id="player_name" type="text" name="player_name" maxlength="40" required>
+        <button type="submit">Continue</button>
+    </form>
+</section>
+
+{% endblock %}

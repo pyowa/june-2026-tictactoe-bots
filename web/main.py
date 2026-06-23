@@ -3,7 +3,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Cookie, Depends, FastAPI, File, Request, UploadFile
+from fastapi import Cookie, Depends, FastAPI, File, Form, Request, Response, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -17,6 +17,13 @@ from messaging.health import broker_check, db_check, make_health_router
 from messaging.log import configure_logging
 from messaging.queue import Queue
 from web.dependencies import get_bots, get_matches, get_moves, get_queue
+from web.play import (
+    TurnRequest,
+    handle_play_turn,
+    handle_set_player_name,
+    render_play_page,
+    render_play_vs_page,
+)
 from web.submit import handle_submission
 from web.templates import not_found, read_template_sample, templates
 from web.utils import group_matches_by_version
@@ -78,6 +85,42 @@ async def submit_bot(
     bots: BotRepository = Depends(get_bots),
 ) -> HTMLResponse:
     return await handle_submission(request, file, ttt_owned_bots, queue, bots)
+
+
+@app.get("/play", response_class=HTMLResponse)
+async def play(
+    request: Request,
+    ttt_player_name: str | None = Cookie(default=None),
+    bots: BotRepository = Depends(get_bots),
+) -> HTMLResponse:
+    return await render_play_page(request, ttt_player_name, bots)
+
+
+@app.post("/play/name", response_class=HTMLResponse)
+async def play_name(
+    request: Request,
+    player_name: str = Form(...),
+) -> HTMLResponse:
+    return handle_set_player_name(request, player_name)
+
+
+@app.get("/play/vs/{bot_id}", response_class=HTMLResponse)
+async def play_vs(
+    request: Request,
+    bot_id: int,
+    ttt_player_name: str | None = Cookie(default=None),
+    bots: BotRepository = Depends(get_bots),
+) -> Response:
+    return await render_play_vs_page(request, bot_id, ttt_player_name, bots)
+
+
+@app.post("/play/turn")
+async def play_turn(
+    request: Request,
+    payload: TurnRequest,
+    bots: BotRepository = Depends(get_bots),
+) -> Response:
+    return await handle_play_turn(request, payload, bots)
 
 
 @app.get("/leaderboard", response_class=HTMLResponse)

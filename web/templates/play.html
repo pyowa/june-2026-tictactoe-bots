@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="card">
+    <h2>Play vs a Bot</h2>
+    <p>Hello, <strong>{{ player_name }}</strong>. Pick a bot to play against.</p>
+
+    {% if bots %}
+    <table id="play-bot-table">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Bot</th>
+                <th>Python</th>
+                <th>Submitted</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for bot in bots %}
+            <tr data-bot="{{ bot.versioned_name }}">
+                <td class="muted">{{ loop.index }}</td>
+                <td><a href="/bots/{{ bot.base_name }}">{{ bot.versioned_name }}</a></td>
+                <td class="muted">{{ bot.python_version }}</td>
+                <td class="muted">{{ bot.submitted_at.strftime('%Y-%m-%d') }}</td>
+                <td><a class="play-action" href="/play/vs/{{ bot.id }}">Play</a></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No bots are ready to play yet. Submit one!</p>
+    {% endif %}
+</section>
+
+{% endblock %}

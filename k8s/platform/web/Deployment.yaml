@@ -15,6 +15,7 @@ spec:
       labels:
         app: web
     spec:
+      serviceAccountName: web
       initContainers:
         - name: migrate
           image: pyowa/web:latest
