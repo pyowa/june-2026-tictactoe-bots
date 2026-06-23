@@ -112,6 +112,12 @@ test("applyHumanMove that completes a tie shows 'Cat game'", () => {
     assert.equal(after.status, "Cat game");
 });
 
+test("applyBotMove ignored when game has ended", () => {
+    const s = { ...initialState(HUMAN_X_CTX), ended: true };
+    const after = applyBotMove(s, HUMAN_X_CTX, "X|.|.\n.|.|.\n.|.|.");
+    assert.equal(after, s);
+});
+
 test("applyBotMove updates board and gives turn back to human", () => {
     const s = initialState(HUMAN_X_CTX);
     s.board = [

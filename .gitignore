@@ -7,6 +7,7 @@ __pycache__/
 # Testing / coverage
 .pytest_cache/
 .coverage
+.coverage-data/
 htmlcov/
 
 # Database

@@ -2,9 +2,15 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := check
 
-.PHONY: test js-test browser-test lint lint-md lint-k8s format typecheck check \
+.PHONY: test js-test browser-test coverage lint lint-md lint-k8s \
+        format typecheck check \
         seed-examples reset-db mutate acceptance \
         kind-up kind-down build-images kind-load reload-web
+
+# Coverage data sinks. Populated by the test targets, read by `make coverage`.
+COVERAGE_DIR := .coverage-data
+NODE_COV_FILE := $(COVERAGE_DIR)/node.txt
+BROWSER_COV_DIR := $(COVERAGE_DIR)/browser
 
 # ── Python / dev ──────────────────────────────────────────────────────────────
 
@@ -12,10 +18,44 @@ test:
 	uv run pytest
 
 js-test:
-	node --test tests/js/*.test.mjs
+	mkdir -p $(COVERAGE_DIR)
+	set -o pipefail; node --test --experimental-test-coverage tests/js/*.test.mjs 2>&1 \
+	  | awk -v out="$(NODE_COV_FILE)" 'BEGIN{cap=0} \
+	      /start of coverage report/{cap=1; print > out; next} \
+	      /end of coverage report/{print > out; cap=0; next} \
+	      cap{print > out; next} \
+	      {print}'
 
 browser-test:
-	uv run pytest tests/browser/ --no-cov -o addopts=""
+	mkdir -p $(BROWSER_COV_DIR)
+	rm -f $(BROWSER_COV_DIR)/*.json
+	JS_COVERAGE_DIR=$(BROWSER_COV_DIR) uv run pytest tests/browser/ --no-cov -o addopts=""
+
+# Re-display the coverage data collected by the last `make check`. Reads
+# from .coverage-data/ and the pytest-cov .coverage file — does NOT re-run
+# any tests.
+coverage:
+	@if [ ! -f .coverage ] && [ ! -f $(NODE_COV_FILE) ] && [ ! -d $(BROWSER_COV_DIR) ]; then \
+	  echo "No coverage data found. Run 'make check' first." >&2; exit 1; \
+	fi
+	@echo "════════════════════════════════════════════════════════════════════════════════"
+	@echo "  Python — pytest + coverage.py"
+	@echo "════════════════════════════════════════════════════════════════════════════════"
+	@if [ -f .coverage ]; then uv run coverage report --show-missing; \
+	  else echo "(no python coverage data)"; fi
+	@echo
+	@echo "════════════════════════════════════════════════════════════════════════════════"
+	@echo "  Node — pure reducers (web/static/*-state.mjs)"
+	@echo "════════════════════════════════════════════════════════════════════════════════"
+	@if [ -f $(NODE_COV_FILE) ]; then cat $(NODE_COV_FILE); \
+	  else echo "(no node coverage data)"; fi
+	@echo
+	@echo "════════════════════════════════════════════════════════════════════════════════"
+	@echo "  Browser — DOM adapters (web/static/*.mjs)"
+	@echo "════════════════════════════════════════════════════════════════════════════════"
+	@if [ -d $(BROWSER_COV_DIR) ] && [ -n "$$(ls -A $(BROWSER_COV_DIR) 2>/dev/null)" ]; then \
+	  JS_COVERAGE_DIR=$(BROWSER_COV_DIR) uv run python -m scripts.js_coverage_report; \
+	  else echo "(no browser coverage data)"; fi
 
 lint:
 	uv run ruff check .
