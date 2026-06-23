@@ -93,5 +93,20 @@ function showAudioOverlay() {
     );
 }
 
+function wireDemoButtons() {
+    // Each click counts as user activation, so the audio context unlocks
+    // here even if the overlay was bypassed somehow.
+    const play = (fn) => () => {
+        const ctx = ensureAudio();
+        if (ctx.state === "suspended") ctx.resume();
+        fn();
+    };
+    const botBtn = document.getElementById("demo-bot-uploaded");
+    if (botBtn) botBtn.addEventListener("click", play(playAirhorn));
+    const matchBtn = document.getElementById("demo-match-finished");
+    if (matchBtn) matchBtn.addEventListener("click", play(playBattleEndDing));
+}
+
 showAudioOverlay();
+wireDemoButtons();
 connect();

@@ -5,6 +5,8 @@ The `HOST_IP` env var is injected onto the web Deployment by
 `make reload-web` (auto-detected from the host's Wi-Fi interface)."""
 
 import os
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -114,6 +116,200 @@ def test_dashboard_loads_dashboard_mjs_for_sound(client) -> None:
     assert 'src="/static/dashboard.mjs"' in resp.text
     # Module type required for `import`-statement support in dashboard.mjs.
     assert 'type="module"' in resp.text
+
+
+def test_dashboard_has_demo_buttons_for_both_sounds(client) -> None:
+    """Two small buttons on the dashboard preview the airhorn and the
+    battle-end sound so the host can demo them to the room."""
+    resp = client.get("/dashboard")
+    assert 'id="demo-bot-uploaded"' in resp.text
+    assert "New Bot" in resp.text
+    assert 'id="demo-match-finished"' in resp.text
+    assert "New Match" in resp.text
+
+
+# ---------------------------------------------------------------------------
+# WebSocket endpoint — /dashboard/ws fans broker events out to dashboard tabs
+# ---------------------------------------------------------------------------
+
+
+class _FakeBrokerMessage:
+    """Stand-in for an aio_pika.IncomingMessage with the `.process()` async
+    context manager + a `.body` attribute, just enough for the endpoint."""
+
+    def __init__(self, body: bytes) -> None:
+        self.body = body
+
+    def process(self) -> Any:
+        class _Ctx:
+            async def __aenter__(self_) -> None:
+                return None
+
+            async def __aexit__(self_, *args: Any) -> bool:
+                return False
+
+        return _Ctx()
+
+
+class _FakeQueueIterator:
+    """Async context manager that yields a pre-canned list of messages then
+    raises StopAsyncIteration — mirrors aio_pika.Queue.iterator() output."""
+
+    def __init__(self, messages: list[_FakeBrokerMessage]) -> None:
+        self._messages = list(messages)
+
+    async def __aenter__(self) -> Any:
+        return self
+
+    async def __aexit__(self, *args: Any) -> bool:
+        return False
+
+    def __aiter__(self) -> Any:
+        return self
+
+    async def __anext__(self) -> _FakeBrokerMessage:
+        if not self._messages:
+            raise StopAsyncIteration
+        return self._messages.pop(0)
+
+
+def _make_fake_broker(messages: list[bytes]) -> MagicMock:
+    """Build a fake aio_pika connection that yields the given message bodies
+    when its queue iterator is consumed, then halts."""
+    fake_queue = MagicMock()
+    fake_queue.bind = AsyncMock()
+    fake_queue.iterator = lambda: _FakeQueueIterator(
+        [_FakeBrokerMessage(b) for b in messages]
+    )
+
+    fake_channel = MagicMock()
+    fake_channel.declare_exchange = AsyncMock(return_value=MagicMock())
+    fake_channel.declare_queue = AsyncMock(return_value=fake_queue)
+
+    fake_connection = MagicMock(is_closed=False)
+    fake_connection.channel = AsyncMock(return_value=fake_channel)
+    fake_connection.close = AsyncMock()
+    return fake_connection
+
+
+def test_dashboard_ws_forwards_broker_messages_as_text_frames(client) -> None:
+    """A message published to the events fanout is forwarded verbatim over
+    the WebSocket as a text frame. Covers the happy path through
+    `dashboard_ws`: connect, declare exchange + queue, bind, consume, send."""
+    fake_connection = _make_fake_broker([b'{"type":"bot.uploaded"}'])
+    with patch(
+        "web.main.aio_pika.connect_robust", AsyncMock(return_value=fake_connection)
+    ):
+        with client.websocket_connect("/dashboard/ws") as ws:
+            text = ws.receive_text()
+    assert text == '{"type":"bot.uploaded"}'
+
+
+def test_dashboard_ws_forwards_multiple_messages_in_order(client) -> None:
+    """All available messages are forwarded in the order they arrive."""
+    fake_connection = _make_fake_broker(
+        [b'{"type":"bot.uploaded"}', b'{"type":"match.finished"}']
+    )
+    with patch(
+        "web.main.aio_pika.connect_robust", AsyncMock(return_value=fake_connection)
+    ):
+        with client.websocket_connect("/dashboard/ws") as ws:
+            first = ws.receive_text()
+            second = ws.receive_text()
+    assert first == '{"type":"bot.uploaded"}'
+    assert second == '{"type":"match.finished"}'
+
+
+def test_dashboard_ws_closes_broker_connection_on_exit(client) -> None:
+    """The `finally` block in `dashboard_ws` must close the broker connection
+    when the iterator drains. Otherwise we'd leak connections per WS."""
+    fake_connection = _make_fake_broker([b'{"type":"bot.uploaded"}'])
+    with patch(
+        "web.main.aio_pika.connect_robust", AsyncMock(return_value=fake_connection)
+    ):
+        with client.websocket_connect("/dashboard/ws") as ws:
+            ws.receive_text()
+    fake_connection.close.assert_awaited()
+
+
+def test_dashboard_ws_skips_close_when_connection_already_closed(client) -> None:
+    """If aio_pika has already torn the connection down (e.g. broker restart)
+    we mustn't double-close. The `not connection.is_closed` guard covers it."""
+    fake_connection = _make_fake_broker([b'{"type":"bot.uploaded"}'])
+    fake_connection.is_closed = True  # simulate already-closed
+    with patch(
+        "web.main.aio_pika.connect_robust", AsyncMock(return_value=fake_connection)
+    ):
+        with client.websocket_connect("/dashboard/ws") as ws:
+            ws.receive_text()
+    fake_connection.close.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# WS exception paths — call the endpoint directly to simulate sends raising
+# WebSocketDisconnect / RuntimeError mid-stream (hard to trigger via the
+# TestClient WebSocket, easy to inject when we provide the WebSocket mock).
+# ---------------------------------------------------------------------------
+
+
+async def test_dashboard_ws_returns_when_send_raises_websocket_disconnect() -> None:
+    """If the client drops mid-stream, send_text raises WebSocketDisconnect;
+    the endpoint returns cleanly and still closes the broker connection."""
+    from fastapi import WebSocketDisconnect
+
+    from web.main import dashboard_ws
+
+    fake_ws = MagicMock()
+    fake_ws.accept = AsyncMock()
+    fake_ws.send_text = AsyncMock(side_effect=WebSocketDisconnect(code=1006))
+
+    fake_connection = _make_fake_broker([b"first", b"second"])
+    with patch(
+        "web.main.aio_pika.connect_robust", AsyncMock(return_value=fake_connection)
+    ):
+        await dashboard_ws(fake_ws)
+
+    fake_ws.accept.assert_awaited()
+    fake_connection.close.assert_awaited()
+
+
+async def test_dashboard_ws_returns_when_send_raises_runtime_error() -> None:
+    """Starlette raises RuntimeError if you send on an already-closed socket.
+    The endpoint must swallow it and close the broker connection."""
+    from web.main import dashboard_ws
+
+    fake_ws = MagicMock()
+    fake_ws.accept = AsyncMock()
+    fake_ws.send_text = AsyncMock(
+        side_effect=RuntimeError("WebSocket is not connected.")
+    )
+
+    fake_connection = _make_fake_broker([b"first"])
+    with patch(
+        "web.main.aio_pika.connect_robust", AsyncMock(return_value=fake_connection)
+    ):
+        await dashboard_ws(fake_ws)
+
+    fake_connection.close.assert_awaited()
+
+
+async def test_dashboard_ws_handles_disconnect_during_setup() -> None:
+    """If the client disconnects before broker setup completes, the outer
+    `except WebSocketDisconnect` swallows it; the finally block runs with
+    `connection is None`, so we don't try to close anything."""
+    from fastapi import WebSocketDisconnect
+
+    from web.main import dashboard_ws
+
+    fake_ws = MagicMock()
+    fake_ws.accept = AsyncMock()
+
+    raising_connect = AsyncMock(side_effect=WebSocketDisconnect(code=1006))
+    with patch("web.main.aio_pika.connect_robust", raising_connect):
+        # Must not raise — the outer handler catches.
+        await dashboard_ws(fake_ws)
+
+    fake_ws.accept.assert_awaited()
 
 
 def test_dashboard_banner_marked_for_full_width_break_out(client) -> None:

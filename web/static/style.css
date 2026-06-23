@@ -252,6 +252,27 @@ button:hover { background: var(--main-yellow); }
     color: var(--paper);
 }
 
+.dashboard-demos {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: flex-end;
+    margin-top: -0.5rem;
+}
+.dashboard-demo-btn {
+    font-family: "Francois One", sans-serif;
+    font-size: 0.95rem;
+    background: var(--paper);
+    color: var(--ink);
+    border: var(--border);
+    border-radius: 999px;
+    padding: 0.4rem 1rem;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+.dashboard-demo-btn:hover { background: var(--main-yellow); }
+
 table {
     width: 100%;
     border-collapse: collapse;
