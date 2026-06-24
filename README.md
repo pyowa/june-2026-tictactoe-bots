@@ -157,6 +157,8 @@ All tools below are provided by the Nix dev shell (`nix develop`). You don't ins
 | **kubectl** | Kubernetes CLI. Apply manifests, stream logs, exec into pods. `kubectl apply -k` uses the built-in Kustomize support. |
 | **kustomize** | Bundled into `kubectl apply -k`. Assembles a list of YAML manifests and applies them in one shot — `kubectl apply -k k8s/` brings up the entire stack. |
 | **k9s** | Terminal UI for the Kubernetes cluster. Browse pods, stream logs, exec shells, all from the keyboard. |
+| **nodejs** | Used only by `make js-test` — runs the pure-JS reducer tests via Node's built-in `--experimental-test-coverage`. No `npm` or `node_modules`. |
+| **playwright-driver.browsers-chromium** | Provides Chromium for `make browser-test`. Pinned via the nix flake so `playwright install` never runs; `PLAYWRIGHT_BROWSERS_PATH` points at the nix store path. |
 | **jq** | JSON processor for the command line. Useful for parsing `kubectl` output. |
 | **curl** | HTTP client. Handy for hitting service endpoints directly. |
 
@@ -168,6 +170,8 @@ The full stack runs in a local [kind](https://kind.sigs.k8s.io/) Kubernetes clus
 - **`bots`** — `dispatcher` (Deployment) + one Pod per uploaded bot
 
 Docker Compose runs only the `mutmut` profile service — mutation testing connects back to the kind cluster's Postgres via `host.docker.internal`. Postgres (5432) and RabbitMQ AMQP (5672) are exposed to the host via NodePorts, so `make test`, `make seed-examples`, and `make reset-db` all work without any extra setup once the cluster is running.
+
+RabbitMQ carries two unrelated message flows: the **work pipeline** (`matches.build` → `matches.schedule` → `matches.ondeck`, plus per-Python-version turn queues used by the RPC pattern) drives the match lifecycle from upload through result-recording, and the **`ttt.events` fanout exchange** carries lightweight notifications (`bot.uploaded`, `match.finished`) that the dashboard's WebSocket (`/dashboard/ws`) forwards to connected browser tabs so they can play sound effects in real time.
 
 #### 1. Uploading a bot
 
@@ -183,6 +187,7 @@ sequenceDiagram
     Web->>Web: parse docstring,<br/>extract name + python version
     Web->>DB: INSERT bot row + source bytes
     Web->>RMQ: publish BuildPodMessage<br/>(matches.build)
+    Web->>RMQ: publish bot.uploaded event<br/>(ttt.events fanout)
     Web-->>Browser: HTML "submitted successfully"
 ```
 
@@ -269,7 +274,28 @@ sequenceDiagram
     end
 
     OH->>DB: INSERT match + moves
+    OH->>RMQ: publish match.finished event<br/>(ttt.events fanout)
     OH->>RMQ: ack matches.ondeck message
+```
+
+#### 6. Dashboard sound effects (real-time push)
+
+The `/dashboard` page is the projection-mode view: a giant host URL banner on top, the leaderboard underneath, plus a click-to-enable audio overlay. Every open dashboard tab subscribes to the `ttt.events` fanout exchange via a WebSocket; published `bot.uploaded` / `match.finished` events trigger synthesized Web Audio sounds (airhorn / bell ding) in real time.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Browser
+    participant Web
+    participant RMQ as RabbitMQ
+    participant Pub as Web (POST /submit)<br/>or Dispatcher (match end)
+
+    Browser->>Web: GET /dashboard/ws (WebSocket)
+    Web->>RMQ: declare ttt.events fanout +<br/>exclusive auto-delete queue
+    Pub->>RMQ: publish bot.uploaded / match.finished
+    RMQ-->>Web: deliver message to bound queue
+    Web-->>Browser: forward as text frame {type, details}
+    Browser->>Browser: play synthesized sound<br/>(airhorn or bell ding)
 ```
 
 `web` and `match_scheduler` run as compose services alongside Postgres and RabbitMQ — built from a single multi-stage `Dockerfile`. The dispatcher runs inside the k8s cluster and hosts two concurrent consumers: `pod_builder` (creates permanent bot pods, marks them ready) and `ondeck_handler` (drives match game loops against existing pods). The server-side allowlist of runtimes lives in `web/runtimes.py`.
@@ -278,18 +304,22 @@ sequenceDiagram
 
 ```text
 tic-tac-toe-event/
-├── web/                       # FastAPI app (submission UI, leaderboard, matches, human-vs-bot play)
+├── web/                       # FastAPI app (submission UI, leaderboard, matches, human-vs-bot play, dashboard with sound effects)
+│   ├── play.py / bot_client.py / submit.py …  # routes + helpers
+│   ├── templates/             # Jinja2 templates; sound-sample files (template_bot.py, test_template_bot.py) for the Getting Started page
+│   └── static/                # CSS + JS modules (match-player.mjs, play.mjs, dashboard.mjs are DOM adapters; *-state.mjs are pure reducers tested with `node --test`)
 ├── runner/                    # engine.py (pure board logic)
-├── dispatcher/                # main.py (k8s dispatcher entrypoint) · pod_builder.py (creates permanent bot pods) · ondeck_handler.py (drives match game loops) · pods.py (pod lifecycle helpers)
+├── dispatcher/                # main.py (k8s dispatcher entrypoint) · pod_builder.py (creates permanent bot pods) · ondeck_handler.py (drives match game loops; publishes match.finished) · pods.py (pod lifecycle helpers)
 ├── match_scheduler/           # main.py — compose service; consumes matches.schedule, publishes MatchOndeck per pairing to matches.ondeck
 ├── bot-runner-images/python/  # turn_server.py HTTP server + Dockerfile for warm bot pods
 ├── entities/                  # Per-entity packages — each has model.py (ORM columns) + repository.py (every query that returns rows of that shape). bot/, match/, move/.
 ├── db/                        # base.py (DeclarativeBase) + session.py (async engine, session factory, get_session helper). No queries live here.
-├── messaging/                 # Queue + RPC abstraction; RabbitMQ implementation; contracts.py
+├── messaging/                 # Queue + RPC abstraction; RabbitMQ implementation; contracts.py (queue names + ttt.events fanout exchange); health.py
 ├── k8s/                       # Kubernetes manifests (NetworkPolicy, dispatcher Deployment/Role/etc.)
 ├── example_bots/              # Reference bots; `make seed-examples` loads these into the DB
 ├── alembic/                   # Migration scripts (versions/)
-└── tests/                     # Test suite
+├── scripts/                   # CLI helpers: reset_db, seed_example_bots, export_bots (dumps bots + leaderboard.md), js_coverage_report
+└── tests/                     # Unit tests (Python) · tests/js/ (Node tests for pure JS reducers) · tests/browser/ (Playwright tests for DOM adapters) · tests/acceptance/ (live-stack opt-in)
 ```
 
 Database access uses **per-entity repositories**: a `BotRepository(session)`, `MatchRepository(session)`, or `MoveRepository(session)` co-locates every query that returns rows shaped like that entity. Cross-entity queries (the leaderboard joins bots + matches; it returns Bot-shaped rows, so it lives on `BotRepository`) live with the entity they project. Routes receive a repo via FastAPI `Depends(get_bots)` (defined in `web/dependencies.py`); tests substitute fakes with `app.dependency_overrides[get_bots] = lambda: ...`. Non-route callers (match_scheduler, scripts) open a session with `async with get_session() as session: BotRepository(session)`.
@@ -302,12 +332,17 @@ Stack: FastAPI · SQLAlchemy 2.x (async, `asyncpg`) on Postgres · RabbitMQ (`ai
 |---|---|
 | `make reset-db` | Drop & recreate the DB **and** purge every RabbitMQ queue (so no stale match jobs linger from the previous DB) |
 | `make seed-examples` | Wipe bots/matches/moves, insert every file under `example_bots/` as a bot (multiple files sharing a `name:` auto-version), then publish `BuildPodMessage` for each bot on `matches.build` |
-| `make test` | Run the test suite with coverage |
+| `make test` | Run the Python test suite (pytest). Coverage data written to `.coverage` (not echoed inline) |
+| `make js-test` | Run the Node test suite for the pure JS reducers (`web/static/*-state.mjs`) via `node --test --experimental-test-coverage`. Coverage table captured to `.coverage-data/node.txt` |
+| `make browser-test` | Run the Playwright suite (`tests/browser/`) against a live in-process uvicorn. Captures V8 JS coverage per test into `.coverage-data/browser/*.json` |
+| `make coverage` | Display the three coverage reports (Python, Node reducers, browser-driven DOM adapter JS) from the data collected by the previous `make check` |
 | `make lint` | Check code with ruff |
 | `make lint-md` | Lint Markdown files with pymarkdown |
+| `make lint-k8s` | Validate k8s manifests with kubeconform (skipped if not installed) |
 | `make format` | Auto-format with ruff |
 | `make typecheck` | Type-check with ty |
-| `make check` | Run lint + lint-md + typecheck + test in sequence |
+| `make check` | Run lint + lint-md + lint-k8s + typecheck + test + js-test + browser-test in sequence |
+| `uv run python -m scripts.export_bots [dir]` | Dump every bot's source to `<dir>/<versioned_name>.py` (default `./extracted_bots/`) plus a `leaderboard.md` snapshot of the final standings |
 | `make acceptance` | Live-stack acceptance tests against the running k8s stack. Opt-in — not part of `make check`. |
 | `make mutate` | Run mutation testing (full run) inside Docker. Requires kind cluster up. |
 | `make mutate MODULE=<pattern>` | Run mutations matching a glob pattern, e.g. `make mutate MODULE="entities.bot.repository*"` |
@@ -315,7 +350,7 @@ Stack: FastAPI · SQLAlchemy 2.x (async, `asyncpg`) on Postgres · RabbitMQ (`ai
 | `make kind-load` | Load locally built images into the kind cluster |
 | `make kind-up` | Full stack bring-up: build images, create cluster, apply all manifests, wait for readiness, load images |
 | `make kind-down` | Destroy the kind cluster |
-| `make reload-web` | Rebuild the web image, load it into kind, and restart the web Deployment |
+| `make reload-web` | Rebuild the web image, load it into kind, auto-detect the Wi-Fi IP via `ipconfig getifaddr en0` and inject it as `HOST_IP` on the web Deployment (powers the `/dashboard` URL banner), then restart |
 
 ### Mutation testing
 
