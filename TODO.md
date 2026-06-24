@@ -161,6 +161,51 @@ The human-vs-bot play feature (`web/play.py`, `web/bot_client.py`, `web/static/p
 - [ ] **Symbol-randomness test is mock-only.** `test_play_vs_human_symbol_x_is_reachable` / `_o_is_reachable` both `monkeypatch.setattr(secrets, "choice", ...)`. If someone hardcoded `human_symbol = "X"` and removed the `secrets.choice(...)` call entirely, the mocks would just sit unused and both tests would pass. Fix: at least one test that doesn't mock and instead asserts over many requests that *both* symbols appear (statistical, but covers the regression).
 - [ ] **Browser tests use a stub bot client.** `tests/browser/test_play.py::stub_bot_client` monkeypatches `web.bot_client.get_core_v1` and `web.bot_client.urlopen`. Any silent break inside `request_bot_turn` that escapes the unit tests would also escape the browser layer. Fix: not really fixable without standing up real bot pods in CI — accept as a known integration gap, but flag if/when adding live-cluster acceptance tests.
 
+### Restyle — long bot names overflow the white card onto the blue body, making link text invisible
+
+`body` has `background: var(--main-blue)` and `main` is a 880px-wide column of white `.card` sections. When a bot's `versioned_name` is long enough that a table cell can't contain it (no `overflow-wrap`, no `word-break`), the text spills *outside* the card onto the page's blue background. Anchor color stays the same so links land on a near-color background and become essentially unreadable.
+
+Where it bites today: leaderboard, matches, dashboard, bot detail, play picker — any table-row rendering of a long name.
+
+Two reasonable fixes (pick one or stack them):
+
+- **Cheap:** flip `body { background }` to `var(--paper)` (white) so any overflow lands on white instead of blue. Loses the visual "cards floating on a colored page" aesthetic but completely sidesteps the readability bug.
+- **Proper:** set `overflow-wrap: anywhere` (or `word-break: break-word`) on the relevant `<td>` / `<a>` rules so long names wrap *inside* the card. Keeps the blue background but fixes the underlying overflow.
+
+Worth doing the proper fix; the cheap fix is a 1-line escape hatch if you need to demo before the proper fix is ready.
+
+Acceptance: a bot named `ThisIsAReallyLongBotNameForTestingOverflow` renders fully inside the card on the leaderboard, matches, and dashboard pages, with the link text remaining legible.
+
+### Audit bot-name handling for injection / unsafe escaping
+
+Bot names are user-supplied (extracted from the uploaded `.py` file's `name:` docstring field) and currently flow into many UI surfaces without explicit input validation. Jinja2's autoescape handles HTML and attribute contexts well in templates, but the threat surface is broader than that and the project hasn't been audited end-to-end. A bot called `"<script>alert(1)</script>"` is the textbook case; less obvious: `"Bot \" onclick=\"alert(1)"`, `"Bot\nname"` (line break injection), or a name containing a URL the user expects to be clickable when it shouldn't be.
+
+Investigation work:
+
+- **Input side**: `web/submit.py::extract_bot_name` / `_validate_bot_name` only reject names ending in the reserved `V<digits>` suffix or empty values. No allowlist of safe characters. Consider restricting to e.g. `[\w][\w \-]*` or similar.
+- **HTML rendering surfaces** to audit (each interpolation of `versioned_name` / `base_name`):
+  - `web/templates/leaderboard.html` — name as link text + base_name in `href`
+  - `web/templates/dashboard.html` — same pattern
+  - `web/templates/matches.html` — bot names in match rows
+  - `web/templates/bot_detail.html` — page heading + family table
+  - `web/templates/match_detail.html` — X/O labels, plus the JSON-in-`<script>` blob driving the match player (the `bot_x`/`bot_o` data attributes on the board element and the embedded `moves_json`)
+  - `web/templates/play.html` — picker table
+  - `web/templates/play_game.html` — `data-bot-name` attribute the JS reads
+  - `web/templates/play_name.html` — player's own display name
+- **JavaScript surfaces** to audit (anywhere `bot_name` / `versioned_name` reaches the DOM without going through Jinja):
+  - `web/static/match-player.mjs` — status caption interpolates `move.bot_name` into `textContent` (safe by default — `textContent` doesn't parse HTML, just sets text)
+  - `web/static/play.mjs` — same pattern for player + bot name in the status caption
+  - `web/static/dashboard.mjs` — the WebSocket events carry `details.versioned_name`, currently not rendered (only used to trigger a sound), but if/when we surface it in the UI it must go through `textContent`, not `innerHTML`
+- **URL construction**: paths like `/bots/{{ base_name }}` and `/play/vs/{{ bot.id }}` — `base_name` is interpolated as a path segment. If a name contains `/`, `?`, `#`, or other reserved URL chars, the route either 404s (mostly fine) or matches an unintended bot detail page. Consider URL-encoding at the boundary or restricting names to URL-safe chars.
+- **Cookie payload**: `web/submit.py::encode_cookie` is used for `ttt_owned_bots` (maps `base_name` → token). The encoder uses `urllib.parse.quote(..., safe="")` so this is already URL-encoded. Worth confirming no decoder path interprets a raw name.
+- **JSON in `<script>` tags**: `web/main.py::_render_match` calls `json.dumps(...)` for `moves_json` which is then `{{ moves_json | safe }}` in the template. `json.dumps` already escapes `<`, `>`, `&` in default mode, so the `| safe` is OK, but worth verifying we never embed unescaped JSON inside `<script>` blocks elsewhere.
+
+Acceptance criteria for closing this out:
+
+- A clear documented allowlist for bot names enforced at submission.
+- Each rendering surface above either traced through Jinja autoescape OR explicitly noted as a `textContent`-only path.
+- A targeted test that uploads a bot named `<script>alert(1)</script>...` and verifies the script tag does NOT execute on the leaderboard, dashboard, match detail, and play picker pages.
+
 ### Swap live-poll for WebSocket-driven updates
 
 Today three pages auto-refresh via `web/static/live-poll.js`, which re-fetches the full page every ~2s and swaps a `#live-region` element's `innerHTML`:
