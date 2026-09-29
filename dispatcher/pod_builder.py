@@ -17,9 +17,11 @@ from db.session import get_session
 from dispatcher.pods import (
     build_bot_pod_manifest,
     get_pod_ip,
-    pod_name as make_pod_name,
     wait_for_http_ready,
     wait_for_pod_ready,
+)
+from dispatcher.pods import (
+    pod_name as make_pod_name,
 )
 from entities.bot.model import Bot
 from entities.bot.repository import BotRepository
